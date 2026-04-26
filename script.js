@@ -14,10 +14,10 @@ const state = {
   isListening: false,
   isVoiceChatMode: false,
   isSpeaking: false,
+  recognitionActive: false,   // FIX BUG 1+2: guard de estado real del objeto
   speechRecognition: null,
   currentOptions: [],
   sessionLog: [],
-  // Modo intensivo
   sessionCount: 0,
   allSessionsLog: [],
   phaseHistory: { name: [], same: [], frame: [], aim: [], game: [] },
@@ -205,54 +205,112 @@ const personalities = {
 };
 
 // ─── WEB SPEECH API ───────────────────────────────────────────────────────────
+// FIX BUG 2: instancia única reutilizable, nunca se recrea mid-session
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
+
 if (SpeechRecognition) {
   recognition = new SpeechRecognition();
   recognition.lang = 'es-UY';
   recognition.continuous = false;
   recognition.interimResults = true;
+
+  recognition.onstart = () => {
+    state.recognitionActive = true;
+  };
+
   recognition.onresult = (e) => {
     const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
     const el = document.getElementById('transcriptText');
     if (el) el.textContent = transcript;
     if (e.results[e.results.length - 1].isFinal) handleVoiceInput(transcript);
   };
-  recognition.onend = () => { if (state.isListening) stopListening(); };
-  recognition.onerror = (e) => { console.warn('Speech error:', e.error); stopListening(); };
+
+  // FIX BUG 1: onend ya NO llama a stopListening() en loop.
+  // Solo actualiza el flag interno. La UI se limpia sólo si isListening
+  // todavía está activo (es decir, el browser cortó solo, no el usuario).
+  recognition.onend = () => {
+    state.recognitionActive = false;
+    if (state.isListening) {
+      // El browser terminó solo (timeout natural con continuous=false)
+      // Actualizamos UI sin llamar a recognition.stop() sobre objeto muerto
+      _cleanupListeningUI();
+      state.isListening = false;
+    }
+  };
+
+  recognition.onerror = (e) => {
+    state.recognitionActive = false;
+    state.isListening = false;
+    _cleanupListeningUI();
+    if (e.error !== 'aborted') console.warn('Speech recognition error:', e.error);
+  };
 }
 
+// FIX BUG 3: speakText con debounce y guard para evitar cancel()+speak() en ráfaga
+let _speakDebounceTimer = null;
+
 function speakText(text, onEnd) {
-  if (!window.speechSynthesis) return onEnd && onEnd();
-  window.speechSynthesis.cancel();
-  const utt = new SpeechSynthesisUtterance(text);
-  utt.lang = 'es-UY';
-  utt.rate = 0.95;
-  utt.pitch = 0.9;
-  const voices = window.speechSynthesis.getVoices();
-  const esVoice = voices.find(v => v.lang.startsWith('es') && v.name.toLowerCase().includes('male'))
-    || voices.find(v => v.lang.startsWith('es')) || voices[0];
-  if (esVoice) utt.voice = esVoice;
-  utt.onstart = () => {
-    const ring = document.getElementById('speakingRing');
-    const lbl  = document.getElementById('speakingLabel');
-    if (ring) ring.classList.add('active');
-    if (lbl)  lbl.textContent = '🔊 Hablando...';
-    state.isSpeaking = true;
-  };
-  utt.onend = () => {
-    const ring = document.getElementById('speakingRing');
-    const lbl  = document.getElementById('speakingLabel');
-    if (ring) ring.classList.remove('active');
-    if (lbl)  lbl.textContent = '🔊 Listo';
-    state.isSpeaking = false;
-    if (onEnd) onEnd();
-  };
-  window.speechSynthesis.speak(utt);
+  if (!window.speechSynthesis) { if (onEnd) onEnd(); return; }
+
+  // Cancelar debounce previo si llega otro en < 80ms (doble click trackpad)
+  clearTimeout(_speakDebounceTimer);
+  _speakDebounceTimer = setTimeout(() => {
+    // cancel() seguro: solo si hay algo hablando
+    if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+      window.speechSynthesis.cancel();
+    }
+
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.lang  = 'es-UY';
+    utt.rate  = 0.95;
+    utt.pitch = 0.9;
+
+    // Elegir voz española disponible
+    const voices  = window.speechSynthesis.getVoices();
+    const esVoice = voices.find(v => v.lang.startsWith('es') && v.name.toLowerCase().includes('male'))
+      || voices.find(v => v.lang.startsWith('es'))
+      || voices[0];
+    if (esVoice) utt.voice = esVoice;
+
+    utt.onstart = () => {
+      const ring = document.getElementById('speakingRing');
+      const lbl  = document.getElementById('speakingLabel');
+      if (ring) ring.classList.add('active');
+      if (lbl)  lbl.textContent = '🔊 Hablando...';
+      state.isSpeaking = true;
+    };
+
+    utt.onend = () => {
+      const ring = document.getElementById('speakingRing');
+      const lbl  = document.getElementById('speakingLabel');
+      if (ring) ring.classList.remove('active');
+      if (lbl)  lbl.textContent = '🔊 Listo';
+      state.isSpeaking = false;
+      if (onEnd) onEnd();
+    };
+
+    utt.onerror = () => {
+      state.isSpeaking = false;
+      if (onEnd) onEnd();
+    };
+
+    window.speechSynthesis.speak(utt);
+  }, 80); // debounce: ignora clicks dobles < 80ms
 }
 
 if (window.speechSynthesis) {
   window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+}
+
+// ─── HELPERS DE UI DE VOZ ────────────────────────────────────────────────────
+function _cleanupListeningUI() {
+  const btn = document.getElementById('btnVoice');
+  const lbl = document.getElementById('voiceLabel');
+  const vt  = document.getElementById('voiceTranscript');
+  if (btn) btn.classList.remove('listening');
+  if (lbl) lbl.textContent  = 'Hablar';
+  if (vt)  vt.style.display = 'none';
 }
 
 // ─── NAVEGACIÓN ───────────────────────────────────────────────────────────────
@@ -272,7 +330,6 @@ function selectDifficulty(btn) {
 function startTraining() {
   state.sessionCount++;
   updateSessionCounter();
-  // Desbloquear modo difícil después de 3 sesiones
   if (state.sessionCount >= 3 && !state.unlockedDifficult) {
     state.unlockedDifficult = true;
     unlockDifficultMode();
@@ -299,8 +356,14 @@ function updateSessionCounter() {
 }
 
 function resetState() {
+  // FIX: detener voz activa al resetear
+  stopListening();
+  if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) {
+    window.speechSynthesis.cancel();
+  }
+
   state.currentPhase = 'name';
-  state.phaseIndex = 0;
+  state.phaseIndex   = 0;
   state.scores    = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
   state.attempts  = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
   state.totalScore = 0;
@@ -341,7 +404,7 @@ function loadPhase(phase) {
   const fb = document.getElementById('feedbackArea');
   if (fb) fb.style.display = 'none';
   const tip = document.getElementById('contextTip');
-  if (tip) { tip.style.display = 'flex'; }
+  if (tip) tip.style.display = 'flex';
   const tipText = document.getElementById('contextTipText');
   if (tipText) tipText.textContent = data.hint;
 
@@ -375,16 +438,14 @@ function processChoice(opt) {
 
   const isCorrect = opt.quality === 'perfect';
   const isOk      = opt.quality === 'ok';
-  let points = isCorrect ? 3 : isOk ? 1 : 0;
+  const points    = isCorrect ? 3 : isOk ? 1 : 0;
 
   state.scores[state.currentPhase] += points;
   state.totalScore += points;
   if (isCorrect) { state.streak++; state.bestStreak = Math.max(state.streak, state.bestStreak); }
   else state.streak = 0;
 
-  // Registrar en historial de fases
   state.phaseHistory[state.currentPhase].push(opt.quality);
-
   state.sessionLog.push({ phase: state.currentPhase, quality: opt.quality, text: opt.text });
 
   updateScoreBadge();
@@ -430,7 +491,13 @@ function toggleVoice() {
 }
 
 function startListening() {
-  if (!recognition) { alert('Tu navegador no soporta reconocimiento de voz. Usá Chrome o Safari.'); return; }
+  if (!recognition) {
+    alert('Tu navegador no soporta reconocimiento de voz. Usá Chrome o Safari.');
+    return;
+  }
+  // FIX BUG 2: guard — no llamar start() si ya está activo
+  if (state.recognitionActive) return;
+
   state.isListening = true;
   const btn = document.getElementById('btnVoice');
   const lbl = document.getElementById('voiceLabel');
@@ -440,18 +507,26 @@ function startListening() {
   if (lbl) lbl.textContent = 'Escuchando...';
   if (vt)  vt.style.display = 'flex';
   if (tt)  tt.textContent   = 'Esperando...';
-  try { recognition.start(); } catch(e) { console.warn(e); }
+
+  try {
+    recognition.start();
+  } catch (e) {
+    // InvalidStateError: ya estaba corriendo (raza de trackpad)
+    state.isListening = false;
+    _cleanupListeningUI();
+    console.warn('recognition.start() error (ignorado):', e.message);
+  }
 }
 
 function stopListening() {
+  if (!state.isListening) return;
   state.isListening = false;
-  const btn = document.getElementById('btnVoice');
-  const lbl = document.getElementById('voiceLabel');
-  const vt  = document.getElementById('voiceTranscript');
-  if (btn) btn.classList.remove('listening');
-  if (lbl) lbl.textContent  = 'Hablar';
-  if (vt)  vt.style.display = 'none';
-  try { recognition.stop(); } catch(e) {}
+  _cleanupListeningUI();
+
+  // FIX BUG 1: solo llamar stop() si el objeto realmente está activo
+  if (state.recognitionActive) {
+    try { recognition.stop(); } catch (e) {}
+  }
 }
 
 function handleVoiceInput(transcript) {
@@ -518,10 +593,10 @@ function showResults() {
   const pct      = Math.round((total / maxScore) * 100);
 
   let icon = '🏆', title = '¡Pitch dominado!', subtitle = 'Estás listo para el lunes.';
-  if (pct < 40) { icon = '😅'; title = 'Hay que practicar más';   subtitle = 'Repetí antes del lunes.'; }
-  else if (pct < 70) { icon = '💪'; title = '¡Buen progreso!'; subtitle = 'Enfocate en las fases débiles.'; }
+  if (pct < 40)       { icon = '😅'; title = 'Hay que practicar más';  subtitle = 'Repetí antes del lunes.'; }
+  else if (pct < 70)  { icon = '💪'; title = '¡Buen progreso!';        subtitle = 'Enfocate en las fases débiles.'; }
 
-  const rIcon = document.getElementById('resultsIcon');
+  const rIcon  = document.getElementById('resultsIcon');
   const rTitle = document.getElementById('resultsTitle');
   const rSub   = document.getElementById('resultsSubtitle');
   if (rIcon)  rIcon.textContent  = icon;
@@ -659,8 +734,7 @@ function updateScoreBadge() {
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 (function init() {
-  // Tema
-  const html  = document.documentElement;
+  const html   = document.documentElement;
   const toggle = document.getElementById('themeToggle');
   let theme    = html.getAttribute('data-theme') || 'dark';
   html.setAttribute('data-theme', theme);
@@ -670,8 +744,6 @@ function updateScoreBadge() {
       html.setAttribute('data-theme', theme);
     });
   }
-  // Precargar cheatsheet en FAB
   buildCheatsheet();
-  // Mostrar contador inicial
   updateSessionCounter();
 })();
