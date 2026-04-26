@@ -1,6 +1,6 @@
-// BlueIA Pitch Trainer — v4 con Kokoro TTS
+// BlueIA Pitch Trainer — v4.1 con Kokoro TTS + fix selector voz
 // Kokoro-82M corre 100% en el browser (WebGPU/WASM), sin API key
-// Fallback automático a Web Speech API (Siri en macOS, voces del sistema)
+// Fallback automático a Web Speech API con selección manual de voz
 
 // ─── ESTADO GLOBAL ───────────────────────────────────────────────────────────
 const state = {
@@ -25,8 +25,10 @@ const state = {
   kokoroReady: false,
   kokoroPipeline: null,
   kokoroLoading: false,
-  selectedKokoroVoice: 'hm_omega',  // voz masculina es-MX por defecto
-  useKokoro: false                   // se activa cuando carga OK
+  selectedKokoroVoice: 'hm_omega',
+  useKokoro: false,
+  // Voz sistema seleccionada por el usuario (nombre exacto de la voz)
+  selectedSystemVoiceName: null
 };
 const phases = ['name', 'same', 'frame', 'aim', 'game'];
 
@@ -210,36 +212,35 @@ const personalities = {
 };
 
 // ─── KOKORO TTS ENGINE ────────────────────────────────────────────────────────
-// Kokoro-82M: modelo open-source de alta calidad, corre en browser sin API key.
-// Repo: https://github.com/hexgrad/kokoro
-// CDN: https://cdn.jsdelivr.net/npm/kokoro-js@latest
-
 const KOKORO_VOICE_MAP = {
   'hm_omega': 'hm_omega',
   'hm_psi':   'hm_psi',
   'hf_alpha': 'hf_alpha'
 };
 
-function _setTTSBadge(mode) {
+function _setTTSBadge(mode, voiceName) {
   const badge  = document.getElementById('ttsEngineBadge');
   const status = document.getElementById('ttsEngineStatus');
   const picker = document.getElementById('voicePicker');
   if (!badge) return;
   if (mode === 'kokoro') {
-    badge.className  = 'badge-enhanced';
+    badge.className   = 'badge-enhanced';
     badge.textContent = '⭐ Kokoro TTS — voz premium';
     if (status) status.textContent = '✅ Kokoro listo · voces premium en tu browser';
     if (picker) picker.style.display = 'block';
   } else if (mode === 'loading') {
-    badge.className  = 'badge-enhanced';
+    badge.className   = 'badge-enhanced';
     badge.textContent = '⏳ Cargando Kokoro (~90MB)...';
-    if (status) status.textContent = 'Descargando modelo de voz. Esto ocurre solo la primera vez y queda en caché.';
+    if (status) status.textContent = 'Descargando modelo de voz. Solo ocurre la primera vez, queda en caché.';
   } else {
-    badge.className  = 'badge-enhanced';
+    badge.className   = 'badge-enhanced';
     badge.style.background = '#6366f122';
     badge.style.color = '#818cf8';
-    badge.textContent = '🔄 Voz del sistema';
-    if (status) status.textContent = 'Usando voces instaladas en tu dispositivo (Siri en macOS, TTS de Android).';
+    const label = voiceName ? `🔄 Sistema · ${voiceName}` : '🔄 Voz del sistema';
+    badge.textContent = label;
+    if (status) status.textContent = voiceName
+      ? `Voz activa: ${voiceName}. Podés cambiarla en el selector.`
+      : 'Usando voces instaladas en tu dispositivo.';
   }
 }
 
@@ -249,12 +250,10 @@ async function initKokoro() {
   _setTTSBadge('loading');
 
   try {
-    // Importar Kokoro desde CDN (ES module)
     const { KokoroTTS } = await import('https://cdn.jsdelivr.net/npm/kokoro-js@1/dist/kokoro.js');
-    // Cargar modelo ONNX es-MX (WebGPU si disponible, WASM si no)
     const pipeline = await KokoroTTS.from_pretrained(
       'onnx-community/Kokoro-82M-v1.0-ONNX',
-      { dtype: 'q8',  device: 'auto' }  // q8 = menor peso, buena calidad
+      { dtype: 'q8', device: 'auto' }
     );
     state.kokoroPipeline = pipeline;
     state.kokoroReady    = true;
@@ -266,9 +265,8 @@ async function initKokoro() {
     console.warn('[BlueIA TTS] Kokoro no disponible, usando Web Speech API:', err.message);
     state.kokoroLoading = false;
     state.useKokoro     = false;
-    _setTTSBadge('system');
-    // Poblar selector con voces del sistema como fallback
-    populateSystemVoicePicker();
+    // Esperar que las voces del sistema estén disponibles, luego poblar
+    _waitForVoicesAndPopulate();
   }
 }
 
@@ -277,7 +275,6 @@ async function speakWithKokoro(text, onEnd) {
   try {
     const voice  = KOKORO_VOICE_MAP[state.selectedKokoroVoice] || 'hm_omega';
     const result = await state.kokoroPipeline(text, { voice, speed: 0.95 });
-    // result.audio es un Float32Array; lo reproducimos vía AudioContext
     const ctx    = new (window.AudioContext || window.webkitAudioContext)();
     const buf    = ctx.createBuffer(1, result.audio.length, result.sampling_rate);
     buf.getChannelData(0).set(result.audio);
@@ -285,16 +282,9 @@ async function speakWithKokoro(text, onEnd) {
     src.buffer   = buf;
     src.connect(ctx.destination);
 
-    const ring = document.getElementById('speakingRing');
-    const lbl  = document.getElementById('speakingLabel');
-    if (ring) ring.classList.add('active');
-    if (lbl)  lbl.textContent = '🔊 Hablando...';
-    state.isSpeaking = true;
-
+    _setSpeakingUI(true);
     src.onended = () => {
-      if (ring) ring.classList.remove('active');
-      if (lbl)  lbl.textContent = '🔊 Listo';
-      state.isSpeaking = false;
+      _setSpeakingUI(false);
       ctx.close();
       if (onEnd) onEnd();
     };
@@ -302,26 +292,48 @@ async function speakWithKokoro(text, onEnd) {
   } catch (err) {
     console.warn('[Kokoro speak error]', err.message);
     state.isSpeaking = false;
-    // Fallback a sistema si Kokoro falla en runtime
     speakWithSystem(text, onEnd);
   }
 }
 
 // ─── WEB SPEECH API FALLBACK ──────────────────────────────────────────────────
-function isSiriVoice(v) { return v.name.toLowerCase().includes('siri'); }
-function isMaleVoice(v) {
+
+// Orden de prioridad: voces masculinas específicas > neutras > femeninas
+// Eddy y Reed son las más naturales en español en macOS/Chrome
+const MALE_VOICE_PRIORITY = ['eddy','reed','rocko','grandpa','jorge','juan','diego','carlos','miguel','pedro'];
+
+function _scoreVoice(v) {
   const n = v.name.toLowerCase();
-  return ['reed','rocko','eddy','grandpa','jorge','juan','diego','carlos'].some(m => n.includes(m));
+  // Prioridad máxima: voces masculinas conocidas en es-MX
+  const maleIdx = MALE_VOICE_PRIORITY.findIndex(m => n.includes(m));
+  if (maleIdx !== -1 && v.lang === 'es-MX') return 100 - maleIdx;
+  if (maleIdx !== -1 && v.lang.startsWith('es')) return 80 - maleIdx;
+  // Siri es siempre buena opción (solo en Safari/macOS)
+  if (n.includes('siri')) return 60;
+  // Otras voces es-MX
+  if (v.lang === 'es-MX') return 20;
+  if (v.lang === 'es-AR') return 15;
+  if (v.lang.startsWith('es')) return 10;
+  return 0;
 }
 
-function getBestSystemVoice() {
-  const all = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
-  const es  = all.filter(v => v.lang.startsWith('es'));
-  if (!es.length) return all[0] || null;
-  return es.find(v => isSiriVoice(v))
-      || es.find(v => v.name.toLowerCase().includes('reed') && v.lang === 'es-MX')
-      || es.find(v => isMaleVoice(v))
-      || es[0];
+function _getBestMaleVoice(voices) {
+  // Devuelve la voz con mayor score — siempre masculina si existe
+  return voices
+    .filter(v => v.lang.startsWith('es'))
+    .sort((a, b) => _scoreVoice(b) - _scoreVoice(a))[0] || voices[0] || null;
+}
+
+function _getActiveSystemVoice() {
+  if (!window.speechSynthesis) return null;
+  const voices = window.speechSynthesis.getVoices();
+  // Si el usuario eligió una voz manualmente, úsala
+  if (state.selectedSystemVoiceName) {
+    const found = voices.find(v => v.name === state.selectedSystemVoiceName);
+    if (found) return found;
+  }
+  // Si no, elegir automáticamente la mejor masculina
+  return _getBestMaleVoice(voices);
 }
 
 let _speakDebounce = null;
@@ -334,51 +346,72 @@ function speakWithSystem(text, onEnd) {
     const utt   = new SpeechSynthesisUtterance(text);
     utt.lang    = 'es-MX';
     utt.rate    = 0.95;
-    utt.pitch   = 0.9;
-    const voice = getBestSystemVoice();
+    utt.pitch   = 0.88;
+    const voice = _getActiveSystemVoice();
     if (voice) utt.voice = voice;
-    utt.onstart = () => {
-      const ring = document.getElementById('speakingRing');
-      const lbl  = document.getElementById('speakingLabel');
-      if (ring) ring.classList.add('active');
-      if (lbl)  lbl.textContent = '🔊 Hablando...';
-      state.isSpeaking = true;
-    };
-    utt.onend = () => {
-      const ring = document.getElementById('speakingRing');
-      const lbl  = document.getElementById('speakingLabel');
-      if (ring) ring.classList.remove('active');
-      if (lbl)  lbl.textContent = '🔊 Listo';
-      state.isSpeaking = false;
-      if (onEnd) onEnd();
-    };
+    utt.onstart = () => _setSpeakingUI(true);
+    utt.onend   = () => { _setSpeakingUI(false); if (onEnd) onEnd(); };
     utt.onerror = () => { state.isSpeaking = false; if (onEnd) onEnd(); };
     window.speechSynthesis.speak(utt);
   }, 80);
 }
 
-function populateSystemVoicePicker() {
-  const select = document.getElementById('voicePicker');
-  if (!select || !window.speechSynthesis) return;
-  const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith('es'));
-  if (!voices.length) return;
-  select.style.display = 'block';
-  select.innerHTML = voices.map(v => {
-    const label = isSiriVoice(v) ? `⭐ ${v.name} · ${v.lang}` :
-                  isMaleVoice(v) ? `♂ ${v.name} (${v.lang})` :
-                                   `♀ ${v.name} (${v.lang})`;
-    return `<option value="${v.name}">${label}</option>`;
-  }).join('');
-  // Preseleccionar Siri si existe
-  const siri = voices.find(v => isSiriVoice(v));
-  if (siri) select.value = siri.name;
-  select.onchange = () => { /* en modo sistema, el getter usa getBestSystemVoice con override */ };
+function _setSpeakingUI(active) {
+  const ring = document.getElementById('speakingRing');
+  const lbl  = document.getElementById('speakingLabel');
+  state.isSpeaking = active;
+  if (ring) ring.classList.toggle('active', active);
+  if (lbl)  lbl.textContent = active ? '🔊 Hablando...' : '🔊 Listo';
 }
 
-if (window.speechSynthesis) {
-  window.speechSynthesis.onvoiceschanged = () => {
-    if (!state.useKokoro) populateSystemVoicePicker();
+// Poblar selector con voces del sistema, pre-seleccionando la mejor masculina
+function _populateSystemPicker(voices) {
+  const select = document.getElementById('voicePicker');
+  if (!select) return;
+
+  const esVoices = voices.filter(v => v.lang.startsWith('es'));
+  if (!esVoices.length) return;
+
+  // Ordenar: masculinas primero, luego por idioma (es-MX > es-AR > es-ES)
+  const sorted = [...esVoices].sort((a, b) => _scoreVoice(b) - _scoreVoice(a));
+
+  select.style.display = 'block';
+  select.innerHTML = sorted.map(v => {
+    const n     = v.name.toLowerCase();
+    const isMale = MALE_VOICE_PRIORITY.some(m => n.includes(m));
+    const isSiri = n.includes('siri');
+    const prefix = isSiri ? '⭐' : isMale ? '♂' : '♀';
+    return `<option value="${v.name}">${prefix} ${v.name} (${v.lang})</option>`;
+  }).join('');
+
+  // Preseleccionar automáticamente la mejor voz masculina
+  const best = _getBestMaleVoice(esVoices);
+  if (best) {
+    select.value = best.name;
+    state.selectedSystemVoiceName = best.name;
+    _setTTSBadge('system', best.name);
+  }
+
+  // Cuando el usuario cambia la selección, respetar su elección
+  select.onchange = () => {
+    state.selectedSystemVoiceName = select.value;
+    _setTTSBadge('system', select.value);
+    // Preview inmediato de la voz elegida
+    speakWithSystem('Hola, soy Mauricio.');
   };
+}
+
+function _waitForVoicesAndPopulate() {
+  if (!window.speechSynthesis) return;
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length > 0) {
+    _populateSystemPicker(voices);
+  } else {
+    // Las voces se cargan de forma async en algunos browsers
+    window.speechSynthesis.onvoiceschanged = () => {
+      if (!state.useKokoro) _populateSystemPicker(window.speechSynthesis.getVoices());
+    };
+  }
 }
 
 // ─── FUNCIÓN PRINCIPAL DE SÍNTESIS ───────────────────────────────────────────
@@ -390,16 +423,14 @@ function speakText(text, onEnd) {
   }
 }
 
-// Manejo del selector de voz Kokoro
+// Selector Kokoro
 document.addEventListener('change', (e) => {
   if (e.target.id !== 'voicePicker') return;
   const val = e.target.value;
   if (val.startsWith('kokoro_')) {
     state.selectedKokoroVoice = val.replace('kokoro_', '');
-  } else if (val === 'system') {
-    state.useKokoro = false;
-    _setTTSBadge('system');
   }
+  // Las voces sistema las maneja select.onchange directamente
 });
 
 // ─── RECONOCIMIENTO DE VOZ ────────────────────────────────────────────────────
@@ -520,7 +551,7 @@ function loadPhase(phase) {
     if (el) { el.classList.remove('active'); if (p === phase) el.classList.add('active'); }
   });
 
-  const mauricioMsg  = personality.responseStyle(data.mauricio);
+  const mauricioMsg = personality.responseStyle(data.mauricio);
   const mtEl = document.getElementById('mauricioText');
   if (mtEl) mtEl.textContent = mauricioMsg.text;
 
@@ -794,6 +825,7 @@ function updateScoreBadge() {
   });
   buildCheatsheet();
   updateSessionCounter();
-  // Iniciar Kokoro en background (no bloquea la UI)
+  // Kokoro carga en background; mientras tanto, ya tenemos voces del sistema listas
+  _waitForVoicesAndPopulate();
   initKokoro();
 })();
