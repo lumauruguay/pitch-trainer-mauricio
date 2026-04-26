@@ -22,7 +22,7 @@ const state = {
   allSessionsLog: [],
   phaseHistory: { name: [], same: [], frame: [], aim: [], game: [] },
   unlockedDifficult: false,
-  selectedVoiceName: null   // FIX: voz elegida manualmente por el usuario
+  selectedVoiceName: null
 };
 const phases = ['name', 'same', 'frame', 'aim', 'game'];
 
@@ -63,7 +63,7 @@ const arbol = {
   },
   same: {
     mauricio: [
-      { text: "¿Y qué tiene que ver eso con Empire?", type: 'curioso' },
+      { text: "¿Y qué tiene que ver eso con Imperio?", type: 'curioso' },
       { text: "Interesante, seguí.", type: 'abierto' },
       { text: "¿Pero vos conocés cómo funcionamos acá?", type: 'esceptico' },
       { text: "¿Cuánto tiempo lleva implementar algo así?", type: 'economico' },
@@ -205,83 +205,94 @@ const personalities = {
   dificil:   { name: '😤 Difícil', responseStyle: (arr) => arr.find(m => m.type === 'esceptico') || arr[arr.length-1], interrupt: true }
 };
 
-// ─── SELECCIÓN DE VOZ — FIX PRINCIPAL ────────────────────────────────────────
-// Apple Enhanced/Premium voices para español NO contienen "male" en su nombre.
-// (Mónica, Jorge, Luciana, Paulina, etc.)
-// Estrategia: buscar por nombre explícito primero, luego por calidad (enhanced/premium),
-// luego cualquier voz en español, luego primera disponible.
+// ─── SELECCIÓN DE VOZ ─────────────────────────────────────────────────────────
+// Voces confirmadas en tu macOS Ventura (resultado consola Safari):
+// Masculinas es-MX: Reed (17), Rocko (10), Eddy (14), Grandpa (18)
+// Masculinas es-ES: Reed (9), Rocko (3), Eddy (8), Grandpa (4)
+// Prioridad: Reed es-MX → Rocko es-MX → Eddy es-MX → Grandpa es-MX → cualquier masculina → cualquier español
+
+// Mapa de género por nombre (voces Apple confirmadas)
+const MALE_VOICE_NAMES   = ['reed', 'rocko', 'eddy', 'grandpa', 'jorge', 'juan', 'diego', 'carlos'];
+const FEMALE_VOICE_NAMES = ['shelley', 'grandma', 'sandy', 'flo', 'mónica', 'monica', 'paulina'];
+
+function isMaleVoice(voice) {
+  const n = voice.name.toLowerCase();
+  return MALE_VOICE_NAMES.some(m => n.includes(m));
+}
 
 function getBestSpanishVoice() {
   const voices = window.speechSynthesis.getVoices();
   if (!voices.length) return null;
 
-  // Voces masculinas Enhanced/Premium de Apple (macOS/iOS) — en orden de preferencia
-  const preferredMaleNames = ['Jorge', 'Juan', 'Andrés', 'Diego', 'Carlos', 'Rodrigo'];
-  // Voces femeninas Enhanced/Premium como fallback secundario
-  const preferredFemaleNames = ['Mónica', 'Luciana', 'Paulina', 'Esperanza', 'Marisol'];
-
-  // Si el usuario eligió una voz manualmente, usarla
+  // Si el usuario eligió manualmente, respetar su elección
   if (state.selectedVoiceName) {
     const manual = voices.find(v => v.name === state.selectedVoiceName);
     if (manual) return manual;
   }
 
-  // 1) Voz masculina preferred con "enhanced" o "premium" en el nombre
-  for (const name of preferredMaleNames) {
-    const v = voices.find(v =>
-      v.name.toLowerCase().includes(name.toLowerCase()) &&
-      (v.name.toLowerCase().includes('enhanced') || v.name.toLowerCase().includes('premium'))
-    );
-    if (v) return v;
-  }
+  const esVoices = voices.filter(v => v.lang.startsWith('es'));
+  if (!esVoices.length) return voices[0];
 
-  // 2) Cualquier voz preferred masculina (sin importar calidad)
-  for (const name of preferredMaleNames) {
-    const v = voices.find(v => v.name.toLowerCase().includes(name.toLowerCase()) && v.lang.startsWith('es'));
-    if (v) return v;
-  }
+  // 1) Reed es-MX (mejor voz masculina confirmada)
+  const reedMX = esVoices.find(v => v.name.toLowerCase().includes('reed') && v.lang === 'es-MX');
+  if (reedMX) return reedMX;
 
-  // 3) Cualquier voz en español con "enhanced" o "premium"
-  const enhanced = voices.find(v =>
-    v.lang.startsWith('es') &&
-    (v.name.toLowerCase().includes('enhanced') || v.name.toLowerCase().includes('premium'))
-  );
-  if (enhanced) return enhanced;
+  // 2) Rocko es-MX
+  const rockoMX = esVoices.find(v => v.name.toLowerCase().includes('rocko') && v.lang === 'es-MX');
+  if (rockoMX) return rockoMX;
 
-  // 4) Fallback: primera voz en español disponible
-  const anyEs = voices.find(v => v.lang.startsWith('es'));
-  if (anyEs) return anyEs;
+  // 3) Eddy es-MX
+  const eddyMX = esVoices.find(v => v.name.toLowerCase().includes('eddy') && v.lang === 'es-MX');
+  if (eddyMX) return eddyMX;
 
-  // 5) Última opción: primera voz del sistema
-  return voices[0];
+  // 4) Grandpa es-MX
+  const grandpaMX = esVoices.find(v => v.name.toLowerCase().includes('grandpa') && v.lang === 'es-MX');
+  if (grandpaMX) return grandpaMX;
+
+  // 5) Cualquier masculina en español
+  const anyMale = esVoices.find(v => isMaleVoice(v));
+  if (anyMale) return anyMale;
+
+  // 6) Fallback: primera voz en español
+  return esVoices[0];
 }
 
-// Poblar el selector de voces en la UI
+// ─── POBLAR EL SELECTOR DE VOCES ─────────────────────────────────────────────
 function populateVoicePicker() {
   const select = document.getElementById('voicePicker');
   if (!select) return;
   const voices = window.speechSynthesis.getVoices();
   const esVoices = voices.filter(v => v.lang.startsWith('es'));
-  if (!esVoices.length) return;
+  if (!esVoices.length) {
+    select.innerHTML = '<option value="">Sin voces en español detectadas</option>';
+    return;
+  }
 
-  select.innerHTML = '<option value="">Auto (recomendado)</option>' +
-    esVoices.map(v =>
-      `<option value="${v.name}" ${state.selectedVoiceName === v.name ? 'selected' : ''}>
-        ${v.name} ${v.name.toLowerCase().includes('enhanced') || v.name.toLowerCase().includes('premium') ? '⭐' : ''}
-        (${v.lang})
-       </option>`
-    ).join('');
+  // Ordenar: masculinas primero, luego femeninas; es-MX antes que es-ES
+  const sorted = [...esVoices].sort((a, b) => {
+    const aMale = isMaleVoice(a) ? 0 : 1;
+    const bMale = isMaleVoice(b) ? 0 : 1;
+    if (aMale !== bMale) return aMale - bMale;
+    if (a.lang === 'es-MX' && b.lang !== 'es-MX') return -1;
+    if (b.lang === 'es-MX' && a.lang !== 'es-MX') return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  // Voz por defecto: Reed es-MX
+  const defaultVoice = getBestSpanishVoice();
+
+  select.innerHTML = '<option value="">Auto (Reed es-MX recomendado)</option>' +
+    sorted.map(v => {
+      const gender  = isMaleVoice(v) ? '♂' : '♀';
+      const isLocal = v.localService ? '' : ' 🌐';
+      const isDefault = defaultVoice && v.name === defaultVoice.name && !state.selectedVoiceName;
+      return `<option value="${v.name}" ${isDefault ? 'selected' : ''}>
+        ${gender} ${v.name} (${v.lang})${isLocal}
+      </option>`;
+    }).join('');
 
   select.onchange = () => {
     state.selectedVoiceName = select.value || null;
-    // Preview de la voz elegida
-    const utt = new SpeechSynthesisUtterance('Hola, soy Mauricio.');
-    utt.lang = 'es-UY';
-    utt.rate = 0.95;
-    const chosenVoice = getBestSpanishVoice();
-    if (chosenVoice) utt.voice = chosenVoice;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utt);
   };
 }
 
@@ -295,9 +306,7 @@ if (SpeechRecognition) {
   recognition.continuous = false;
   recognition.interimResults = true;
 
-  recognition.onstart = () => {
-    state.recognitionActive = true;
-  };
+  recognition.onstart = () => { state.recognitionActive = true; };
 
   recognition.onresult = (e) => {
     const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
@@ -308,10 +317,7 @@ if (SpeechRecognition) {
 
   recognition.onend = () => {
     state.recognitionActive = false;
-    if (state.isListening) {
-      _cleanupListeningUI();
-      state.isListening = false;
-    }
+    if (state.isListening) { _cleanupListeningUI(); state.isListening = false; }
   };
 
   recognition.onerror = (e) => {
@@ -322,7 +328,7 @@ if (SpeechRecognition) {
   };
 }
 
-// ─── speakText — usa getBestSpanishVoice() ────────────────────────────────────
+// ─── speakText ────────────────────────────────────────────────────────────────
 let _speakDebounceTimer = null;
 
 function speakText(text, onEnd) {
@@ -334,12 +340,10 @@ function speakText(text, onEnd) {
       window.speechSynthesis.cancel();
     }
 
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang  = 'es-UY';
-    utt.rate  = 0.95;
-    utt.pitch = 0.9;
-
-    // FIX: usar selector inteligente en lugar de .includes('male')
+    const utt   = new SpeechSynthesisUtterance(text);
+    utt.lang    = 'es-UY';
+    utt.rate    = 0.95;
+    utt.pitch   = 0.9;
     const voice = getBestSpanishVoice();
     if (voice) utt.voice = voice;
 
@@ -360,10 +364,7 @@ function speakText(text, onEnd) {
       if (onEnd) onEnd();
     };
 
-    utt.onerror = () => {
-      state.isSpeaking = false;
-      if (onEnd) onEnd();
-    };
+    utt.onerror = () => { state.isSpeaking = false; if (onEnd) onEnd(); };
 
     window.speechSynthesis.speak(utt);
   }, 80);
@@ -372,7 +373,7 @@ function speakText(text, onEnd) {
 if (window.speechSynthesis) {
   window.speechSynthesis.onvoiceschanged = () => {
     window.speechSynthesis.getVoices();
-    populateVoicePicker(); // FIX: repoblar el picker cuando las voces cargan
+    populateVoicePicker();
   };
 }
 
@@ -433,7 +434,6 @@ function resetState() {
   if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) {
     window.speechSynthesis.cancel();
   }
-
   state.currentPhase = 'name';
   state.phaseIndex   = 0;
   state.scores    = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
@@ -443,8 +443,8 @@ function resetState() {
   state.sessionLog = [];
   updateScoreBadge();
   phases.forEach(p => {
-    const el  = document.getElementById('phase' + p.toUpperCase());
-    const st  = document.getElementById('status' + p.toUpperCase());
+    const el = document.getElementById('phase' + p.toUpperCase());
+    const st = document.getElementById('status' + p.toUpperCase());
     if (el) el.classList.remove('active', 'done');
     if (st) st.textContent = '';
   });
@@ -457,8 +457,8 @@ function resetState() {
 // ─── FASES ────────────────────────────────────────────────────────────────────
 function loadPhase(phase) {
   state.currentPhase = phase;
-  const data        = arbol[phase];
-  const personality = personalities[state.difficulty] || personalities['curioso'];
+  const data         = arbol[phase];
+  const personality  = personalities[state.difficulty] || personalities['curioso'];
 
   const badge = document.getElementById('currentPhaseBadge');
   if (badge) badge.textContent = phase.toUpperCase();
@@ -563,10 +563,7 @@ function toggleVoice() {
 }
 
 function startListening() {
-  if (!recognition) {
-    alert('Tu navegador no soporta reconocimiento de voz. Usá Chrome o Safari.');
-    return;
-  }
+  if (!recognition) { alert('Tu navegador no soporta reconocimiento de voz. Usá Chrome o Safari.'); return; }
   if (state.recognitionActive) return;
 
   state.isListening = true;
@@ -579,12 +576,10 @@ function startListening() {
   if (vt)  vt.style.display = 'flex';
   if (tt)  tt.textContent   = 'Esperando...';
 
-  try {
-    recognition.start();
-  } catch (e) {
+  try { recognition.start(); } catch (e) {
     state.isListening = false;
     _cleanupListeningUI();
-    console.warn('recognition.start() error (ignorado):', e.message);
+    console.warn('recognition.start() error:', e.message);
   }
 }
 
@@ -592,9 +587,7 @@ function stopListening() {
   if (!state.isListening) return;
   state.isListening = false;
   _cleanupListeningUI();
-  if (state.recognitionActive) {
-    try { recognition.stop(); } catch (e) {}
-  }
+  if (state.recognitionActive) { try { recognition.stop(); } catch (e) {} }
 }
 
 function handleVoiceInput(transcript) {
@@ -602,10 +595,10 @@ function handleVoiceInput(transcript) {
   const t = transcript.toLowerCase();
   let bestMatch = null, bestScore = 0;
   state.currentOptions.forEach((opt, i) => {
-    const words   = opt.text.toLowerCase().split(' ');
-    let matches   = 0;
+    const words  = opt.text.toLowerCase().split(' ');
+    let matches  = 0;
     words.forEach(w => { if (t.includes(w) && w.length > 4) matches++; });
-    const score   = matches / Math.max(words.length, 1);
+    const score  = matches / Math.max(words.length, 1);
     if (score > bestScore) { bestScore = score; bestMatch = i; }
   });
   if (bestScore > 0.12 && bestMatch !== null) {
@@ -644,14 +637,6 @@ function calcPhaseAvg(phase) {
   return Math.round((sum / (hist.length * 3)) * 100);
 }
 
-function buildCumulativeStats() {
-  return phases.map(p => {
-    const avg = calcPhaseAvg(p);
-    const sessions = state.phaseHistory[p].length;
-    return { phase: p, avg, sessions };
-  });
-}
-
 // ─── RESULTADOS ───────────────────────────────────────────────────────────────
 function showResults() {
   showScreen('screenResults');
@@ -661,8 +646,8 @@ function showResults() {
   const pct      = Math.round((total / maxScore) * 100);
 
   let icon = '🏆', title = '¡Pitch dominado!', subtitle = 'Estás listo para el lunes.';
-  if (pct < 40)       { icon = '😅'; title = 'Hay que practicar más';  subtitle = 'Repetí antes del lunes.'; }
-  else if (pct < 70)  { icon = '💪'; title = '¡Buen progreso!';        subtitle = 'Enfocate en las fases débiles.'; }
+  if (pct < 40)      { icon = '😅'; title = 'Hay que practicar más';  subtitle = 'Repetí antes del lunes.'; }
+  else if (pct < 70) { icon = '💪'; title = '¡Buen progreso!';        subtitle = 'Enfocate en las fases débiles.'; }
 
   const rIcon  = document.getElementById('resultsIcon');
   const rTitle = document.getElementById('resultsTitle');
@@ -716,35 +701,17 @@ function restartSameConfig() { startTraining(); }
 
 // ─── CHEATSHEET ───────────────────────────────────────────────────────────────
 const cheatsheetData = [
-  {
-    phase: 'NAME',
-    text: 'Soy Adrián Mariotti, fundador de BlueIA. Soy el ingeniero de IA que convierte el caos de tu comercio en un sistema que trabaja solo.'
-  },
-  {
-    phase: 'SAME',
-    text: 'Estuve mirando Imperio. Tienen 9.500 seguidores en Facebook, sorteos, videos. Toda esa fuerza hoy no le dice nada: qué promo dejó más margen, qué clientes volvieron. Cada día empieza de cero.'
-  },
-  {
-    phase: 'FRAME',
-    text: 'El problema no es que trabajás poco. Es que Imperio no tiene memoria. Lo que pasa en caja, stock, redes y WhatsApp se pierde. Sin esa memoria, no hay inteligencia. Y sin inteligencia, el crecimiento tiene un techo invisible.'
-  },
-  {
-    phase: 'AIM',
-    text: 'En el primer mes: las consultas repetitivas de WhatsApp se responden solas. Tenés un tablero con tus números clave. Y recibís alertas cuando algo importante se desvía. No tenés que estar en todo.'
-  },
-  {
-    phase: 'GAME',
-    text: 'Mi juego es que cualquier PyME de Canelones tome decisiones con la misma claridad que una gran cadena. Imperio ya es el referente en precio y cercanía. Yo quiero que sea también el primer supermercado verdaderamente inteligente de la zona. Nivel Tienda Inglesa, costo de PyME.'
-  }
+  { phase: 'NAME',  text: 'Soy Adrián Mariotti, fundador de BlueIA. Soy el ingeniero de IA que convierte el caos de tu comercio en un sistema que trabaja solo.' },
+  { phase: 'SAME',  text: 'Estuve mirando Imperio. Tienen 9.500 seguidores en Facebook, sorteos, videos. Toda esa fuerza hoy no le dice nada: qué promo dejó más margen, qué clientes volvieron. Cada día empieza de cero.' },
+  { phase: 'FRAME', text: 'El problema no es que trabajás poco. Es que Imperio no tiene memoria. Lo que pasa en caja, stock, redes y WhatsApp se pierde. Sin esa memoria, no hay inteligencia. Y sin inteligencia, el crecimiento tiene un techo invisible.' },
+  { phase: 'AIM',   text: 'En el primer mes: las consultas repetitivas de WhatsApp se responden solas. Tenés un tablero con tus números clave. Y recibís alertas cuando algo importante se desvía. No tenés que estar en todo.' },
+  { phase: 'GAME',  text: 'Mi juego es que cualquier PyME de Canelones tome decisiones con la misma claridad que una gran cadena. Imperio ya es el referente en precio y cercanía. Yo quiero que sea también el primer supermercado verdaderamente inteligente de la zona. Nivel Tienda Inglesa, costo de PyME.' }
 ];
 
 function buildCheatsheet() {
   const el  = document.getElementById('cheatsheet');
   const fcC = document.getElementById('fcContent');
-  const html = cheatsheetData.map(d => `
-    <h3>${d.phase}</h3>
-    <p>${d.text}</p>
-  `).join('');
+  const html = cheatsheetData.map(d => `<h3>${d.phase}</h3><p>${d.text}</p>`).join('');
   if (el)  el.innerHTML  = html;
   if (fcC) fcC.innerHTML = cheatsheetData.map(d => `
     <div class="fc-phase">${d.phase}</div>
@@ -765,16 +732,12 @@ function toggleFloatingCheatsheet() {
   if (el.style.display === 'block') buildCheatsheet();
 }
 
-// ─── EXPORTAR GUION COMO TEXTO ────────────────────────────────────────────────
+// ─── EXPORTAR GUION ───────────────────────────────────────────────────────────
 function exportGuion() {
   const lines = [
     '=== GUION BlueIA — VISITA A MAURICIO · Imperio del Este, Salinas ===',
     '',
-    ...cheatsheetData.map(d => [
-      `[ ${d.phase} ]`,
-      d.text,
-      ''
-    ].join('\n')),
+    ...cheatsheetData.map(d => [`[ ${d.phase} ]`, d.text, ''].join('\n')),
     '--- Objections quick-guide ---',
     '"No tengo tiempo"     → "Justo de eso se trata. BlueIA le devuelve tiempo. ¿5 minutos más?"',
     '"Debe ser caro"       → "El primer mes es diagnóstico. El costo es de una app de celular."',
@@ -782,8 +745,7 @@ function exportGuion() {
     '',
     `Generado: ${new Date().toLocaleString('es-UY')} · Sesión #${state.sessionCount}`
   ];
-  const text = lines.join('\n');
-  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href     = url;
@@ -814,6 +776,5 @@ function updateScoreBadge() {
   }
   buildCheatsheet();
   updateSessionCounter();
-  // Poblar picker de voces (puede ya estar cargado o esperar al evento)
   populateVoicePicker();
 })();
