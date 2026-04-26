@@ -9,7 +9,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <style>
-    /* ── EXTRAS Opción C ── */
     .session-counter {
       font-size: var(--text-xs);
       color: var(--color-text-faint);
@@ -59,8 +58,6 @@
     }
     .obj-q { color: var(--color-warning); font-weight: 600; }
     .obj-a { color: var(--color-text-muted); }
-
-    /* ── PANEL DE VOZ ── */
     .voice-config-panel {
       width: 100%;
       max-width: 480px;
@@ -79,8 +76,9 @@
       display: flex;
       align-items: center;
       gap: 0.4rem;
+      flex-wrap: wrap;
     }
-    .voice-config-panel label span.badge-enhanced {
+    .badge-enhanced {
       font-size: 0.65rem;
       background: var(--color-primary);
       color: white;
@@ -105,6 +103,17 @@
       color: var(--color-text-faint);
       line-height: 1.5;
     }
+    .tts-engine-badge {
+      font-size: 0.65rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-weight: 700;
+      display: inline-block;
+      margin-bottom: 2px;
+    }
+    .tts-engine-badge.kokoro  { background: #22c55e22; color: #22c55e; border: 1px solid #22c55e55; }
+    .tts-engine-badge.loading { background: #f59e0b22; color: #f59e0b; border: 1px solid #f59e0b55; }
+    .tts-engine-badge.system  { background: #6366f122; color: #818cf8; border: 1px solid #6366f155; }
     .btn-preview-voice {
       font-size: var(--text-xs);
       padding: var(--space-1) var(--space-3);
@@ -116,15 +125,11 @@
       transition: all 180ms ease;
       align-self: flex-start;
     }
-    .btn-preview-voice:hover {
-      background: var(--color-primary);
-      color: white;
-    }
+    .btn-preview-voice:hover { background: var(--color-primary); color: white; }
   </style>
 </head>
 <body>
 
-<!-- HEADER -->
 <header class="app-header">
   <div class="header-inner">
     <div class="logo">
@@ -146,7 +151,6 @@
   </div>
 </header>
 
-<!-- SCREENS -->
 <main id="appMain">
 
   <!-- SCREEN: BIENVENIDA -->
@@ -162,31 +166,32 @@
       <h1>Entrenador de Pitch</h1>
       <p class="welcome-sub">Preparate para tu visita a <strong>Mauricio</strong><br>Supermercado El Imperio · Salinas</p>
       <div class="welcome-tags">
-        <span class="tag">NAME</span>
-        <span class="tag-arrow">→</span>
-        <span class="tag">SAME</span>
-        <span class="tag-arrow">→</span>
-        <span class="tag">FRAME</span>
-        <span class="tag-arrow">→</span>
-        <span class="tag">AIM</span>
-        <span class="tag-arrow">→</span>
+        <span class="tag">NAME</span><span class="tag-arrow">→</span>
+        <span class="tag">SAME</span><span class="tag-arrow">→</span>
+        <span class="tag">FRAME</span><span class="tag-arrow">→</span>
+        <span class="tag">AIM</span><span class="tag-arrow">→</span>
         <span class="tag">GAME</span>
       </div>
       <p class="welcome-desc">Practicá el pitch completo con voz. Mauricio responde como el dueño real. Feedback inmediato basado en Priestley y Meléndez.</p>
 
-      <!-- ── PANEL DE VOZ (NUEVO) ── -->
+      <!-- PANEL DE VOZ -->
       <div class="voice-config-panel">
         <label for="voicePicker">
           🔊 Voz de Mauricio
-          <span class="badge-enhanced">⭐ Enhanced = mejor calidad</span>
+          <span class="badge-enhanced" id="ttsEngineBadge">⏳ Cargando Kokoro...</span>
         </label>
-        <select id="voicePicker">
-          <option value="">Cargando voces...</option>
+        <div id="ttsEngineStatus" style="font-size:0.7rem;color:var(--color-text-faint);line-height:1.5">Iniciando motor de voz premium...</div>
+        <select id="voicePicker" style="display:none">
+          <option value="kokoro_hm_omega">⭐ Kokoro · hm_omega (masculino, premium)</option>
+          <option value="kokoro_hm_psi">⭐ Kokoro · hm_psi (masculino, grave)</option>
+          <option value="kokoro_hf_alpha">Kokoro · hf_alpha (femenino)</option>
+          <option value="system">🔄 Voz del sistema (fallback)</option>
         </select>
-        <button class="btn-preview-voice" onclick="previewVoice()">▶ Probar voz seleccionada</button>
-        <p class="voice-hint">
-          Las voces marcadas con ⭐ son Enhanced/Premium (instaladas en tu Mac).<br>
-          Si no ves ninguna, abrí <strong>Preferencias del Sistema → Accesibilidad → Contenido hablado</strong> y descargá una voz en español.
+        <button class="btn-preview-voice" onclick="previewVoice()">▶ Probar voz</button>
+        <p class="voice-hint" id="voiceHint">
+          <strong>Kokoro TTS</strong> corre en tu browser sin API key — calidad ElevenLabs, gratis.<br>
+          Primera carga: ~90MB (se cachea, luego funciona offline).
+          Funciona en <strong>Chrome Android</strong> y macOS.
         </p>
       </div>
 
@@ -194,29 +199,19 @@
         <p class="difficulty-label">Elegí la personalidad de Mauricio:</p>
         <div class="difficulty-grid">
           <button class="diff-btn active" data-difficulty="curioso" onclick="selectDifficulty(this)">
-            <span class="diff-emoji">🤔</span>
-            <span class="diff-name">Curioso</span>
-            <span class="diff-desc">Hace preguntas, escucha</span>
+            <span class="diff-emoji">🤔</span><span class="diff-name">Curioso</span><span class="diff-desc">Hace preguntas, escucha</span>
           </button>
           <button class="diff-btn" data-difficulty="ocupado" onclick="selectDifficulty(this)">
-            <span class="diff-emoji">⏱️</span>
-            <span class="diff-name">Ocupado</span>
-            <span class="diff-desc">Poco tiempo, interrumpe</span>
+            <span class="diff-emoji">⏱️</span><span class="diff-name">Ocupado</span><span class="diff-desc">Poco tiempo, interrumpe</span>
           </button>
           <button class="diff-btn" data-difficulty="esceptico" onclick="selectDifficulty(this)">
-            <span class="diff-emoji">🧱</span>
-            <span class="diff-name">Escéptico</span>
-            <span class="diff-desc">Desconfía de la tecnología</span>
+            <span class="diff-emoji">🧱</span><span class="diff-name">Escéptico</span><span class="diff-desc">Desconfía de la tecnología</span>
           </button>
           <button class="diff-btn" data-difficulty="economico" onclick="selectDifficulty(this)">
-            <span class="diff-emoji">💰</span>
-            <span class="diff-name">Economista</span>
-            <span class="diff-desc">Todo le parece caro</span>
+            <span class="diff-emoji">💰</span><span class="diff-name">Economista</span><span class="diff-desc">Todo le parece caro</span>
           </button>
           <button class="diff-btn" data-difficulty="abierto" onclick="selectDifficulty(this)">
-            <span class="diff-emoji">✅</span>
-            <span class="diff-name">Abierto</span>
-            <span class="diff-desc">Receptivo, ideal para empezar</span>
+            <span class="diff-emoji">✅</span><span class="diff-name">Abierto</span><span class="diff-desc">Receptivo, ideal para empezar</span>
           </button>
         </div>
       </div>
@@ -230,45 +225,22 @@
   <!-- SCREEN: TRAINING -->
   <section class="screen" id="screenTraining">
     <div class="training-layout">
-
-      <!-- Sidebar de progreso -->
       <aside class="progress-sidebar">
         <div class="progress-header">Tu progreso</div>
         <div class="phase-list" id="phaseList">
-          <div class="phase-item" data-phase="name" id="phaseNAME">
-            <span class="phase-dot"></span><span class="phase-label">NAME</span><span class="phase-status" id="statusNAME"></span>
-          </div>
-          <div class="phase-item" data-phase="same" id="phaseSAME">
-            <span class="phase-dot"></span><span class="phase-label">SAME</span><span class="phase-status" id="statusSAME"></span>
-          </div>
-          <div class="phase-item" data-phase="frame" id="phaseFRAME">
-            <span class="phase-dot"></span><span class="phase-label">FRAME</span><span class="phase-status" id="statusFRAME"></span>
-          </div>
-          <div class="phase-item" data-phase="aim" id="phaseAIM">
-            <span class="phase-dot"></span><span class="phase-label">AIM</span><span class="phase-status" id="statusAIM"></span>
-          </div>
-          <div class="phase-item" data-phase="game" id="phaseGAME">
-            <span class="phase-dot"></span><span class="phase-label">GAME</span><span class="phase-status" id="statusGAME"></span>
-          </div>
+          <div class="phase-item" data-phase="name" id="phaseNAME"><span class="phase-dot"></span><span class="phase-label">NAME</span><span class="phase-status" id="statusNAME"></span></div>
+          <div class="phase-item" data-phase="same" id="phaseSAME"><span class="phase-dot"></span><span class="phase-label">SAME</span><span class="phase-status" id="statusSAME"></span></div>
+          <div class="phase-item" data-phase="frame" id="phaseFRAME"><span class="phase-dot"></span><span class="phase-label">FRAME</span><span class="phase-status" id="statusFRAME"></span></div>
+          <div class="phase-item" data-phase="aim" id="phaseAIM"><span class="phase-dot"></span><span class="phase-label">AIM</span><span class="phase-status" id="statusAIM"></span></div>
+          <div class="phase-item" data-phase="game" id="phaseGAME"><span class="phase-dot"></span><span class="phase-label">GAME</span><span class="phase-status" id="statusGAME"></span></div>
         </div>
-        <div class="sidebar-score">
-          <div class="score-label">Decisiones correctas</div>
-          <div class="score-number" id="sidebarScore">0</div>
-        </div>
-        <div class="sidebar-streak">
-          <div class="streak-label">Racha actual</div>
-          <div class="streak-number" id="sidebarStreak">🔥 0</div>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="showScreen('screenWelcome')" style="margin-top:auto">
-          ← Volver al inicio
-        </button>
+        <div class="sidebar-score"><div class="score-label">Decisiones correctas</div><div class="score-number" id="sidebarScore">0</div></div>
+        <div class="sidebar-streak"><div class="streak-label">Racha actual</div><div class="streak-number" id="sidebarStreak">🔥 0</div></div>
+        <button class="btn btn-ghost btn-sm" onclick="showScreen('screenWelcome')" style="margin-top:auto">← Volver al inicio</button>
       </aside>
 
-      <!-- Panel principal -->
       <div class="training-main">
         <div class="phase-badge" id="currentPhaseBadge">NAME</div>
-
-        <!-- Burbuja de Mauricio -->
         <div class="mauricio-area">
           <div class="mauricio-avatar">
             <span>M</span>
@@ -285,19 +257,12 @@
             </div>
           </div>
         </div>
-
-        <!-- Cita de contexto -->
         <div class="context-tip" id="contextTip" style="display:none">
-          <span class="tip-icon">💡</span>
-          <span id="contextTipText"></span>
+          <span class="tip-icon">💡</span><span id="contextTipText"></span>
         </div>
-
-        <!-- Feedback -->
         <div class="feedback-area" id="feedbackArea" style="display:none">
           <div class="feedback-content" id="feedbackContent"></div>
         </div>
-
-        <!-- Opciones de respuesta -->
         <div class="response-area" id="responseArea">
           <div class="response-header">
             <span class="response-label" id="responseLabel">¿Qué decís vos?</span>
@@ -312,8 +277,6 @@
             <span id="transcriptText">Escuchando tu voz...</span>
           </div>
         </div>
-
-        <!-- Chat de voz continuo -->
         <div class="voice-chat-bar" id="voiceChatBar">
           <button class="btn-voice-chat" id="btnVoiceChat" onclick="toggleVoiceChat()">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
@@ -332,89 +295,47 @@
         <h2 id="resultsTitle">¡Sesión completada!</h2>
         <p id="resultsSubtitle">Así te fue en esta sesión:</p>
       </div>
-
       <div class="results-grid" id="resultsGrid"></div>
       <div class="results-summary" id="resultsSummary"></div>
       <div class="results-recommendation" id="resultsRecommendation"></div>
-
-      <!-- Acciones principales -->
       <div class="results-actions">
         <button class="btn btn-primary" onclick="restartSameConfig()">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.87"/></svg>
           Repetir con mismo Mauricio
         </button>
-        <button class="btn btn-secondary" onclick="showScreen('screenWelcome')">
-          Cambiar dificultad
-        </button>
+        <button class="btn btn-secondary" onclick="showScreen('screenWelcome')">Cambiar dificultad</button>
       </div>
-
-      <!-- Exportar guion -->
       <div class="export-bar">
-        <button class="btn btn-ghost btn-sm" onclick="exportGuion()">
-          💾 Exportar guion .txt
-        </button>
-        <button class="btn btn-ghost btn-sm" onclick="toggleCheatsheet()">
-          📋 Ver guion completo
-        </button>
+        <button class="btn btn-ghost btn-sm" onclick="exportGuion()">💾 Exportar guion .txt</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleCheatsheet()">📋 Ver guion completo</button>
       </div>
-
-      <!-- Cheatsheet desplegable -->
       <div class="cheatsheet-section" style="width:100%;max-width:560px">
         <div class="cheatsheet" id="cheatsheet" style="display:none"></div>
       </div>
-
-      <!-- Objeciones rápidas -->
       <div class="objections-panel">
         <h4>🛡️ Objeciones rápidas</h4>
-        <div class="objection-row">
-          <span class="obj-q">"No tengo tiempo"</span>
-          <span class="obj-a">→ "Justo de eso se trata. BlueIA le devuelve tiempo. ¿5 minutos más?"</span>
-        </div>
-        <div class="objection-row">
-          <span class="obj-q">"Debe ser caro"</span>
-          <span class="obj-a">→ "El primer mes es diagnóstico. El costo es de una app de celular."</span>
-        </div>
-        <div class="objection-row">
-          <span class="obj-q">"No entiendo de IA"</span>
-          <span class="obj-a">→ "No necesita entenderla. Igual que no entiende cómo funciona su freezer."</span>
-        </div>
-        <div class="objection-row">
-          <span class="obj-q">"Mandáme algo escrito"</span>
-          <span class="obj-a">→ "Perfecto. ¿Cuál es su WhatsApp? Le mando el resumen antes del viernes."</span>
-        </div>
+        <div class="objection-row"><span class="obj-q">"No tengo tiempo"</span><span class="obj-a">→ "Justo de eso se trata. BlueIA le devuelve tiempo. ¿5 minutos más?"</span></div>
+        <div class="objection-row"><span class="obj-q">"Debe ser caro"</span><span class="obj-a">→ "El primer mes es diagnóstico. El costo es de una app de celular."</span></div>
+        <div class="objection-row"><span class="obj-q">"No entiendo de IA"</span><span class="obj-a">→ "No necesita entenderla. Igual que no entiende cómo funciona su freezer."</span></div>
+        <div class="objection-row"><span class="obj-q">"Mandáme algo escrito"</span><span class="obj-a">→ "Perfecto. ¿Cuál es su WhatsApp? Le mando el resumen antes del viernes."</span></div>
       </div>
     </div>
   </section>
 
 </main>
 
-<!-- FLOATING: Cheatsheet rápido -->
 <div class="fab-area">
-  <button class="fab" id="fabCheatsheet" onclick="toggleFloatingCheatsheet()" title="Guion rápido">
-    📋
-  </button>
+  <button class="fab" id="fabCheatsheet" onclick="toggleFloatingCheatsheet()" title="Guion rápido">📋</button>
 </div>
 <div class="floating-cheatsheet" id="floatingCheatsheet" style="display:none">
-  <div class="fc-header">
-    <strong>Guion rápido</strong>
-    <button onclick="toggleFloatingCheatsheet()">&#10005;</button>
-  </div>
+  <div class="fc-header"><strong>Guion rápido</strong><button onclick="toggleFloatingCheatsheet()">&#10005;</button></div>
   <div class="fc-content" id="fcContent"></div>
 </div>
 
 <script src="script.js"></script>
 <script>
-  // Función de preview para el botón "Probar voz seleccionada"
   function previewVoice() {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utt = new SpeechSynthesisUtterance('Hola, soy Mauricio del Imperio del Este. Decime, ¿en qué le puedo ayudar?');
-    utt.lang = 'es-UY';
-    utt.rate = 0.95;
-    utt.pitch = 0.9;
-    const voice = getBestSpanishVoice();
-    if (voice) utt.voice = voice;
-    window.speechSynthesis.speak(utt);
+    speakText('Hola, soy Mauricio del Imperio del Este. Decime, ¿en qué le puedo ayudar?');
   }
 </script>
 </body>

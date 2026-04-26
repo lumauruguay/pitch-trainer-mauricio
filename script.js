@@ -1,7 +1,8 @@
-// BlueIA Pitch Trainer — Lógica principal v3
-// Árbol NAME/SAME/FRAME/AIM/GAME para visita a Mauricio (Imperio del Este)
+// BlueIA Pitch Trainer — v4 con Kokoro TTS
+// Kokoro-82M corre 100% en el browser (WebGPU/WASM), sin API key
+// Fallback automático a Web Speech API (Siri en macOS, voces del sistema)
 
-// ─── ESTADO GLOBAL ────────────────────────────────────────────────────────────
+// ─── ESTADO GLOBAL ───────────────────────────────────────────────────────────
 const state = {
   difficulty: 'curioso',
   currentPhase: 'name',
@@ -15,18 +16,21 @@ const state = {
   isVoiceChatMode: false,
   isSpeaking: false,
   recognitionActive: false,
-  speechRecognition: null,
   currentOptions: [],
   sessionLog: [],
   sessionCount: 0,
-  allSessionsLog: [],
   phaseHistory: { name: [], same: [], frame: [], aim: [], game: [] },
   unlockedDifficult: false,
-  selectedVoiceName: null
+  // TTS engine
+  kokoroReady: false,
+  kokoroPipeline: null,
+  kokoroLoading: false,
+  selectedKokoroVoice: 'hm_omega',  // voz masculina es-MX por defecto
+  useKokoro: false                   // se activa cuando carga OK
 };
 const phases = ['name', 'same', 'frame', 'aim', 'game'];
 
-// ─── ÁRBOL DE DECISIONES ──────────────────────────────────────────────────────
+// ─── ÁRBOL DE DECISIONES ─────────────────────────────────────────────────────
 const arbol = {
   name: {
     mauricio: [
@@ -195,171 +199,144 @@ const arbol = {
   }
 };
 
-// ─── PERSONALIDADES DE MAURICIO ───────────────────────────────────────────────
+// ─── PERSONALIDADES ───────────────────────────────────────────────────────────
 const personalities = {
-  curioso:   { name: 'Curioso',    responseStyle: (arr) => arr.find(m => m.type === 'curioso')   || arr[0], interrupt: false },
-  ocupado:   { name: 'Ocupado',    responseStyle: (arr) => arr.find(m => m.type === 'ocupado')   || arr[0], interrupt: true  },
-  esceptico: { name: 'Escéptico',  responseStyle: (arr) => arr.find(m => m.type === 'esceptico') || arr[0], interrupt: false },
-  economico: { name: 'Economista', responseStyle: (arr) => arr.find(m => m.type === 'economico') || arr[0], interrupt: false },
-  abierto:   { name: 'Abierto',    responseStyle: (arr) => arr.find(m => m.type === 'abierto')   || arr[0], interrupt: false },
-  dificil:   { name: '😤 Difícil', responseStyle: (arr) => arr.find(m => m.type === 'esceptico') || arr[arr.length-1], interrupt: true }
+  curioso:   { name: 'Curioso',    responseStyle: (arr) => arr.find(m => m.type === 'curioso')   || arr[0] },
+  ocupado:   { name: 'Ocupado',    responseStyle: (arr) => arr.find(m => m.type === 'ocupado')   || arr[0] },
+  esceptico: { name: 'Escéptico',  responseStyle: (arr) => arr.find(m => m.type === 'esceptico') || arr[0] },
+  economico: { name: 'Economista', responseStyle: (arr) => arr.find(m => m.type === 'economico') || arr[0] },
+  abierto:   { name: 'Abierto',    responseStyle: (arr) => arr.find(m => m.type === 'abierto')   || arr[0] },
+  dificil:   { name: '😤 Difícil', responseStyle: (arr) => arr.find(m => m.type === 'esceptico') || arr[arr.length - 1] }
 };
 
-// ─── SELECCIÓN DE VOZ ─────────────────────────────────────────────────────────
-// En macOS, la voz se registra como "Siri (Voz 1)" — NO como "Paulina".
-// Prioridad:
-//   1. Cualquier voz cuyo nombre contenga "siri" (es-MX o es-*)
-//   2. Reed es-MX
-//   3. Rocko es-MX
-//   4. Eddy es-MX
-//   5. Grandpa es-MX
-//   6. Cualquier masculina en español
-//   7. Primera voz en español disponible
+// ─── KOKORO TTS ENGINE ────────────────────────────────────────────────────────
+// Kokoro-82M: modelo open-source de alta calidad, corre en browser sin API key.
+// Repo: https://github.com/hexgrad/kokoro
+// CDN: https://cdn.jsdelivr.net/npm/kokoro-js@latest
 
-const MALE_FALLBACK_NAMES = ['reed', 'rocko', 'eddy', 'grandpa', 'jorge', 'juan', 'diego', 'carlos'];
+const KOKORO_VOICE_MAP = {
+  'hm_omega': 'hm_omega',
+  'hm_psi':   'hm_psi',
+  'hf_alpha': 'hf_alpha'
+};
 
-function isSiriVoice(voice) {
-  return voice.name.toLowerCase().includes('siri');
-}
-
-function isMaleVoice(voice) {
-  const n = voice.name.toLowerCase();
-  return MALE_FALLBACK_NAMES.some(m => n.includes(m));
-}
-
-function getBestSpanishVoice() {
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return null;
-
-  // Respetar selección manual del usuario
-  if (state.selectedVoiceName) {
-    const manual = voices.find(v => v.name === state.selectedVoiceName);
-    if (manual) return manual;
+function _setTTSBadge(mode) {
+  const badge  = document.getElementById('ttsEngineBadge');
+  const status = document.getElementById('ttsEngineStatus');
+  const picker = document.getElementById('voicePicker');
+  if (!badge) return;
+  if (mode === 'kokoro') {
+    badge.className  = 'badge-enhanced';
+    badge.textContent = '⭐ Kokoro TTS — voz premium';
+    if (status) status.textContent = '✅ Kokoro listo · voces premium en tu browser';
+    if (picker) picker.style.display = 'block';
+  } else if (mode === 'loading') {
+    badge.className  = 'badge-enhanced';
+    badge.textContent = '⏳ Cargando Kokoro (~90MB)...';
+    if (status) status.textContent = 'Descargando modelo de voz. Esto ocurre solo la primera vez y queda en caché.';
+  } else {
+    badge.className  = 'badge-enhanced';
+    badge.style.background = '#6366f122';
+    badge.style.color = '#818cf8';
+    badge.textContent = '🔄 Voz del sistema';
+    if (status) status.textContent = 'Usando voces instaladas en tu dispositivo (Siri en macOS, TTS de Android).';
   }
-
-  const esVoices = voices.filter(v => v.lang.startsWith('es'));
-  if (!esVoices.length) return voices[0];
-
-  // 1) Siri (cualquier variante: "Siri (Voz 1)", "Siri Voz 1", etc.) en español
-  const siriES = esVoices.find(v => isSiriVoice(v));
-  if (siriES) return siriES;
-
-  // 2) Reed es-MX
-  const reed = esVoices.find(v => v.name.toLowerCase().includes('reed') && v.lang === 'es-MX');
-  if (reed) return reed;
-
-  // 3) Rocko es-MX
-  const rocko = esVoices.find(v => v.name.toLowerCase().includes('rocko') && v.lang === 'es-MX');
-  if (rocko) return rocko;
-
-  // 4) Eddy es-MX
-  const eddy = esVoices.find(v => v.name.toLowerCase().includes('eddy') && v.lang === 'es-MX');
-  if (eddy) return eddy;
-
-  // 5) Grandpa es-MX
-  const grandpa = esVoices.find(v => v.name.toLowerCase().includes('grandpa') && v.lang === 'es-MX');
-  if (grandpa) return grandpa;
-
-  // 6) Cualquier masculina en español
-  const anyMale = esVoices.find(v => isMaleVoice(v));
-  if (anyMale) return anyMale;
-
-  // 7) Fallback
-  return esVoices[0];
 }
 
-// ─── POBLAR SELECTOR DE VOCES ─────────────────────────────────────────────────
-function populateVoicePicker() {
-  const select = document.getElementById('voicePicker');
-  if (!select) return;
-  const voices   = window.speechSynthesis.getVoices();
-  const esVoices = voices.filter(v => v.lang.startsWith('es'));
-  if (!esVoices.length) {
-    select.innerHTML = '<option value="">Sin voces en español detectadas</option>';
-    return;
+async function initKokoro() {
+  if (state.kokoroLoading || state.kokoroReady) return;
+  state.kokoroLoading = true;
+  _setTTSBadge('loading');
+
+  try {
+    // Importar Kokoro desde CDN (ES module)
+    const { KokoroTTS } = await import('https://cdn.jsdelivr.net/npm/kokoro-js@1/dist/kokoro.js');
+    // Cargar modelo ONNX es-MX (WebGPU si disponible, WASM si no)
+    const pipeline = await KokoroTTS.from_pretrained(
+      'onnx-community/Kokoro-82M-v1.0-ONNX',
+      { dtype: 'q8',  device: 'auto' }  // q8 = menor peso, buena calidad
+    );
+    state.kokoroPipeline = pipeline;
+    state.kokoroReady    = true;
+    state.useKokoro      = true;
+    state.kokoroLoading  = false;
+    _setTTSBadge('kokoro');
+    console.log('[BlueIA TTS] Kokoro listo ✅');
+  } catch (err) {
+    console.warn('[BlueIA TTS] Kokoro no disponible, usando Web Speech API:', err.message);
+    state.kokoroLoading = false;
+    state.useKokoro     = false;
+    _setTTSBadge('system');
+    // Poblar selector con voces del sistema como fallback
+    populateSystemVoicePicker();
   }
-
-  // Ordenar: Siri primero, luego masculinas es-MX, luego resto
-  const sorted = [...esVoices].sort((a, b) => {
-    const aSiri = isSiriVoice(a) ? 0 : 1;
-    const bSiri = isSiriVoice(b) ? 0 : 1;
-    if (aSiri !== bSiri) return aSiri - bSiri;
-    const aMale = isMaleVoice(a) ? 0 : 1;
-    const bMale = isMaleVoice(b) ? 0 : 1;
-    if (aMale !== bMale) return aMale - bMale;
-    if (a.lang === 'es-MX' && b.lang !== 'es-MX') return -1;
-    if (b.lang === 'es-MX' && a.lang !== 'es-MX') return 1;
-    return a.name.localeCompare(b.name);
-  });
-
-  const defaultVoice = getBestSpanishVoice();
-
-  select.innerHTML = '<option value="">Auto (recomendado)</option>' +
-    sorted.map(v => {
-      const isSiri = isSiriVoice(v);
-      const label  = isSiri     ? `⭐ ${v.name} · ${v.lang}` :
-                     isMaleVoice(v) ? `♂ ${v.name} (${v.lang})` :
-                                      `♀ ${v.name} (${v.lang})`;
-      const sel = !state.selectedVoiceName && defaultVoice && v.name === defaultVoice.name;
-      return `<option value="${v.name}" ${sel ? 'selected' : ''}>${label}</option>`;
-    }).join('');
-
-  select.onchange = () => {
-    state.selectedVoiceName = select.value || null;
-  };
 }
 
-// ─── WEB SPEECH API ───────────────────────────────────────────────────────────
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition = null;
+async function speakWithKokoro(text, onEnd) {
+  if (!state.kokoroPipeline) { if (onEnd) onEnd(); return; }
+  try {
+    const voice  = KOKORO_VOICE_MAP[state.selectedKokoroVoice] || 'hm_omega';
+    const result = await state.kokoroPipeline(text, { voice, speed: 0.95 });
+    // result.audio es un Float32Array; lo reproducimos vía AudioContext
+    const ctx    = new (window.AudioContext || window.webkitAudioContext)();
+    const buf    = ctx.createBuffer(1, result.audio.length, result.sampling_rate);
+    buf.getChannelData(0).set(result.audio);
+    const src    = ctx.createBufferSource();
+    src.buffer   = buf;
+    src.connect(ctx.destination);
 
-if (SpeechRecognition) {
-  recognition = new SpeechRecognition();
-  recognition.lang = 'es-UY';
-  recognition.continuous = false;
-  recognition.interimResults = true;
+    const ring = document.getElementById('speakingRing');
+    const lbl  = document.getElementById('speakingLabel');
+    if (ring) ring.classList.add('active');
+    if (lbl)  lbl.textContent = '🔊 Hablando...';
+    state.isSpeaking = true;
 
-  recognition.onstart = () => { state.recognitionActive = true; };
-
-  recognition.onresult = (e) => {
-    const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
-    const el = document.getElementById('transcriptText');
-    if (el) el.textContent = transcript;
-    if (e.results[e.results.length - 1].isFinal) handleVoiceInput(transcript);
-  };
-
-  recognition.onend = () => {
-    state.recognitionActive = false;
-    if (state.isListening) { _cleanupListeningUI(); state.isListening = false; }
-  };
-
-  recognition.onerror = (e) => {
-    state.recognitionActive = false;
-    state.isListening = false;
-    _cleanupListeningUI();
-    if (e.error !== 'aborted') console.warn('Speech recognition error:', e.error);
-  };
+    src.onended = () => {
+      if (ring) ring.classList.remove('active');
+      if (lbl)  lbl.textContent = '🔊 Listo';
+      state.isSpeaking = false;
+      ctx.close();
+      if (onEnd) onEnd();
+    };
+    src.start();
+  } catch (err) {
+    console.warn('[Kokoro speak error]', err.message);
+    state.isSpeaking = false;
+    // Fallback a sistema si Kokoro falla en runtime
+    speakWithSystem(text, onEnd);
+  }
 }
 
-// ─── speakText ────────────────────────────────────────────────────────────────
-let _speakDebounceTimer = null;
+// ─── WEB SPEECH API FALLBACK ──────────────────────────────────────────────────
+function isSiriVoice(v) { return v.name.toLowerCase().includes('siri'); }
+function isMaleVoice(v) {
+  const n = v.name.toLowerCase();
+  return ['reed','rocko','eddy','grandpa','jorge','juan','diego','carlos'].some(m => n.includes(m));
+}
 
-function speakText(text, onEnd) {
+function getBestSystemVoice() {
+  const all = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
+  const es  = all.filter(v => v.lang.startsWith('es'));
+  if (!es.length) return all[0] || null;
+  return es.find(v => isSiriVoice(v))
+      || es.find(v => v.name.toLowerCase().includes('reed') && v.lang === 'es-MX')
+      || es.find(v => isMaleVoice(v))
+      || es[0];
+}
+
+let _speakDebounce = null;
+function speakWithSystem(text, onEnd) {
   if (!window.speechSynthesis) { if (onEnd) onEnd(); return; }
-
-  clearTimeout(_speakDebounceTimer);
-  _speakDebounceTimer = setTimeout(() => {
-    if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+  clearTimeout(_speakDebounce);
+  _speakDebounce = setTimeout(() => {
+    if (window.speechSynthesis.speaking || window.speechSynthesis.pending)
       window.speechSynthesis.cancel();
-    }
-
     const utt   = new SpeechSynthesisUtterance(text);
-    utt.lang    = 'es-MX';   // es-MX para que Siri (Voz 1) suene natural
+    utt.lang    = 'es-MX';
     utt.rate    = 0.95;
     utt.pitch   = 0.9;
-    const voice = getBestSpanishVoice();
+    const voice = getBestSystemVoice();
     if (voice) utt.voice = voice;
-
     utt.onstart = () => {
       const ring = document.getElementById('speakingRing');
       const lbl  = document.getElementById('speakingLabel');
@@ -367,7 +344,6 @@ function speakText(text, onEnd) {
       if (lbl)  lbl.textContent = '🔊 Hablando...';
       state.isSpeaking = true;
     };
-
     utt.onend = () => {
       const ring = document.getElementById('speakingRing');
       const lbl  = document.getElementById('speakingLabel');
@@ -376,21 +352,85 @@ function speakText(text, onEnd) {
       state.isSpeaking = false;
       if (onEnd) onEnd();
     };
-
     utt.onerror = () => { state.isSpeaking = false; if (onEnd) onEnd(); };
-
     window.speechSynthesis.speak(utt);
   }, 80);
 }
 
+function populateSystemVoicePicker() {
+  const select = document.getElementById('voicePicker');
+  if (!select || !window.speechSynthesis) return;
+  const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith('es'));
+  if (!voices.length) return;
+  select.style.display = 'block';
+  select.innerHTML = voices.map(v => {
+    const label = isSiriVoice(v) ? `⭐ ${v.name} · ${v.lang}` :
+                  isMaleVoice(v) ? `♂ ${v.name} (${v.lang})` :
+                                   `♀ ${v.name} (${v.lang})`;
+    return `<option value="${v.name}">${label}</option>`;
+  }).join('');
+  // Preseleccionar Siri si existe
+  const siri = voices.find(v => isSiriVoice(v));
+  if (siri) select.value = siri.name;
+  select.onchange = () => { /* en modo sistema, el getter usa getBestSystemVoice con override */ };
+}
+
 if (window.speechSynthesis) {
   window.speechSynthesis.onvoiceschanged = () => {
-    window.speechSynthesis.getVoices();
-    populateVoicePicker();
+    if (!state.useKokoro) populateSystemVoicePicker();
   };
 }
 
-// ─── HELPERS UI VOZ ───────────────────────────────────────────────────────────
+// ─── FUNCIÓN PRINCIPAL DE SÍNTESIS ───────────────────────────────────────────
+function speakText(text, onEnd) {
+  if (state.useKokoro && state.kokoroReady) {
+    speakWithKokoro(text, onEnd);
+  } else {
+    speakWithSystem(text, onEnd);
+  }
+}
+
+// Manejo del selector de voz Kokoro
+document.addEventListener('change', (e) => {
+  if (e.target.id !== 'voicePicker') return;
+  const val = e.target.value;
+  if (val.startsWith('kokoro_')) {
+    state.selectedKokoroVoice = val.replace('kokoro_', '');
+  } else if (val === 'system') {
+    state.useKokoro = false;
+    _setTTSBadge('system');
+  }
+});
+
+// ─── RECONOCIMIENTO DE VOZ ────────────────────────────────────────────────────
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.lang = 'es-UY';
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.onstart  = () => { state.recognitionActive = true; };
+  recognition.onresult = (e) => {
+    const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
+    const el = document.getElementById('transcriptText');
+    if (el) el.textContent = transcript;
+    if (e.results[e.results.length - 1].isFinal) handleVoiceInput(transcript);
+  };
+  recognition.onend = () => {
+    state.recognitionActive = false;
+    if (state.isListening) { _cleanupListeningUI(); state.isListening = false; }
+  };
+  recognition.onerror = (e) => {
+    state.recognitionActive = false;
+    state.isListening = false;
+    _cleanupListeningUI();
+    if (e.error !== 'aborted') console.warn('Speech recognition error:', e.error);
+  };
+}
+
+// ─── UI HELPERS ───────────────────────────────────────────────────────────────
 function _cleanupListeningUI() {
   const btn = document.getElementById('btnVoice');
   const lbl = document.getElementById('voiceLabel');
@@ -444,13 +484,12 @@ function updateSessionCounter() {
 
 function resetState() {
   stopListening();
-  if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) {
+  if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending))
     window.speechSynthesis.cancel();
-  }
   state.currentPhase = 'name';
   state.phaseIndex   = 0;
-  state.scores    = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
-  state.attempts  = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
+  state.scores   = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
+  state.attempts = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
   state.totalScore = 0;
   state.streak     = 0;
   state.sessionLog = [];
@@ -470,8 +509,8 @@ function resetState() {
 // ─── FASES ────────────────────────────────────────────────────────────────────
 function loadPhase(phase) {
   state.currentPhase = phase;
-  const data         = arbol[phase];
-  const personality  = personalities[state.difficulty] || personalities['curioso'];
+  const data        = arbol[phase];
+  const personality = personalities[state.difficulty] || personalities['curioso'];
 
   const badge = document.getElementById('currentPhaseBadge');
   if (badge) badge.textContent = phase.toUpperCase();
@@ -482,9 +521,8 @@ function loadPhase(phase) {
   });
 
   const mauricioMsg  = personality.responseStyle(data.mauricio);
-  const mauricioText = mauricioMsg.text;
   const mtEl = document.getElementById('mauricioText');
-  if (mtEl) mtEl.textContent = mauricioText;
+  if (mtEl) mtEl.textContent = mauricioMsg.text;
 
   const fb = document.getElementById('feedbackArea');
   if (fb) fb.style.display = 'none';
@@ -493,7 +531,7 @@ function loadPhase(phase) {
   const tipText = document.getElementById('contextTipText');
   if (tipText) tipText.textContent = data.hint;
 
-  speakText(mauricioText);
+  speakText(mauricioMsg.text);
 
   const opts = [...data.options].sort(() => Math.random() - 0.5);
   state.currentOptions = opts;
@@ -531,7 +569,7 @@ function processChoice(opt) {
   else state.streak = 0;
 
   state.phaseHistory[state.currentPhase].push(opt.quality);
-  state.sessionLog.push({ phase: state.currentPhase, quality: opt.quality, text: opt.text });
+  state.sessionLog.push({ phase: state.currentPhase, quality: opt.quality });
 
   updateScoreBadge();
   const sS = document.getElementById('sidebarScore');
@@ -570,15 +608,12 @@ function processChoice(opt) {
   }, isCorrect ? 2500 : 3500);
 }
 
-// ─── VOZ ──────────────────────────────────────────────────────────────────────
-function toggleVoice() {
-  state.isListening ? stopListening() : startListening();
-}
+// ─── VOZ (RECONOCIMIENTO) ─────────────────────────────────────────────────────
+function toggleVoice() { state.isListening ? stopListening() : startListening(); }
 
 function startListening() {
-  if (!recognition) { alert('Tu navegador no soporta reconocimiento de voz. Usá Chrome o Safari.'); return; }
+  if (!recognition) { alert('Tu navegador no soporta reconocimiento de voz. Usá Chrome.'); return; }
   if (state.recognitionActive) return;
-
   state.isListening = true;
   const btn = document.getElementById('btnVoice');
   const lbl = document.getElementById('voiceLabel');
@@ -588,11 +623,9 @@ function startListening() {
   if (lbl) lbl.textContent = 'Escuchando...';
   if (vt)  vt.style.display = 'flex';
   if (tt)  tt.textContent   = 'Esperando...';
-
   try { recognition.start(); } catch (e) {
     state.isListening = false;
     _cleanupListeningUI();
-    console.warn('recognition.start() error:', e.message);
   }
 }
 
@@ -608,15 +641,14 @@ function handleVoiceInput(transcript) {
   const t = transcript.toLowerCase();
   let bestMatch = null, bestScore = 0;
   state.currentOptions.forEach((opt, i) => {
-    const words  = opt.text.toLowerCase().split(' ');
-    let matches  = 0;
+    const words = opt.text.toLowerCase().split(' ');
+    let matches = 0;
     words.forEach(w => { if (t.includes(w) && w.length > 4) matches++; });
-    const score  = matches / Math.max(words.length, 1);
+    const score = matches / Math.max(words.length, 1);
     if (score > bestScore) { bestScore = score; bestMatch = i; }
   });
-  if (bestScore > 0.12 && bestMatch !== null) {
-    selectOption(bestMatch);
-  } else {
+  if (bestScore > 0.12 && bestMatch !== null) selectOption(bestMatch);
+  else {
     const rl = document.getElementById('responseLabel');
     if (rl) rl.textContent = '"' + transcript.substring(0, 60) + '..." — Elegí la opción más cercana:';
   }
@@ -642,7 +674,7 @@ function repeatMauricio() {
   if (el) speakText(el.textContent);
 }
 
-// ─── PROGRESO ACUMULADO ───────────────────────────────────────────────────────
+// ─── PROGRESO Y RESULTADOS ────────────────────────────────────────────────────
 function calcPhaseAvg(phase) {
   const hist = state.phaseHistory[phase];
   if (!hist.length) return null;
@@ -650,27 +682,21 @@ function calcPhaseAvg(phase) {
   return Math.round((sum / (hist.length * 3)) * 100);
 }
 
-// ─── RESULTADOS ───────────────────────────────────────────────────────────────
 function showResults() {
   showScreen('screenResults');
-
   const total    = state.totalScore;
   const maxScore = phases.length * 3;
   const pct      = Math.round((total / maxScore) * 100);
-
   let icon = '🏆', title = '¡Pitch dominado!', subtitle = 'Estás listo para el lunes.';
   if (pct < 40)      { icon = '😅'; title = 'Hay que practicar más';  subtitle = 'Repetí antes del lunes.'; }
   else if (pct < 70) { icon = '💪'; title = '¡Buen progreso!';        subtitle = 'Enfocate en las fases débiles.'; }
-
   const rIcon  = document.getElementById('resultsIcon');
   const rTitle = document.getElementById('resultsTitle');
   const rSub   = document.getElementById('resultsSubtitle');
   if (rIcon)  rIcon.textContent  = icon;
   if (rTitle) rTitle.textContent = title;
   if (rSub)   rSub.textContent   = subtitle;
-
   updateScoreBadge();
-
   const grid = document.getElementById('resultsGrid');
   if (grid) {
     grid.innerHTML = phases.map(p => {
@@ -678,18 +704,10 @@ function showResults() {
       const avg = calcPhaseAvg(p);
       const cls = s >= 3 ? 'good' : s >= 1 ? 'ok' : 'bad';
       const lbl = s >= 3 ? 'Perfecto' : s >= 1 ? 'Mejorable' : 'Repasar';
-      const trendHtml = avg !== null
-        ? `<div class="result-trend">${avg}% histórico (${state.phaseHistory[p].length} ses.)</div>`
-        : '';
-      return `<div class="result-card">
-        <div class="result-phase">${p.toUpperCase()}</div>
-        <div class="result-score ${cls}">${s >= 3 ? '✅' : s >= 1 ? '⚠️' : '❌'}</div>
-        <div class="result-label">${lbl}</div>
-        ${trendHtml}
-      </div>`;
+      const trendHtml = avg !== null ? `<div class="result-trend">${avg}% histórico (${state.phaseHistory[p].length} ses.)</div>` : '';
+      return `<div class="result-card"><div class="result-phase">${p.toUpperCase()}</div><div class="result-score ${cls}">${s >= 3 ? '✅' : s >= 1 ? '⚠️' : '❌'}</div><div class="result-label">${lbl}</div>${trendHtml}</div>`;
     }).join('');
   }
-
   const weak = phases.filter(p => state.scores[p] < 3).map(p => p.toUpperCase());
   const rSum = document.getElementById('resultsSummary');
   if (rSum) rSum.innerHTML = `
@@ -698,15 +716,12 @@ function showResults() {
     ${weak.length ? '<br>⚠️ Fases a repasar: <strong>' + weak.join(', ') + '</strong>' : '✅ Todas las fases dominadas'}
     ${state.sessionCount >= 3 ? '<br>🔓 Modo <strong>Difícil</strong> desbloqueado.' : ''}
   `;
-
   let rec = '💡 ';
   if (pct >= 80)      rec += 'Estás listo. Mauricio te va a escuchar. Confiá en tu NAME y tu FRAME.';
   else if (pct >= 50) rec += 'Repetí especialmente ' + (weak[0] || 'FRAME') + '. Es tu fase más débil.';
   else                rec += 'Practicá 3 sesiones más. Enfocate en el SAME — donde más se gana o pierde.';
-
   const rRec = document.getElementById('resultsRecommendation');
   if (rRec) rRec.textContent = rec;
-
   buildCheatsheet();
 }
 
@@ -726,10 +741,7 @@ function buildCheatsheet() {
   const fcC = document.getElementById('fcContent');
   const html = cheatsheetData.map(d => `<h3>${d.phase}</h3><p>${d.text}</p>`).join('');
   if (el)  el.innerHTML  = html;
-  if (fcC) fcC.innerHTML = cheatsheetData.map(d => `
-    <div class="fc-phase">${d.phase}</div>
-    <div class="fc-text">${d.text}</div>
-  `).join('');
+  if (fcC) fcC.innerHTML = cheatsheetData.map(d => `<div class="fc-phase">${d.phase}</div><div class="fc-text">${d.text}</div>`).join('');
 }
 
 function toggleCheatsheet() {
@@ -748,25 +760,20 @@ function toggleFloatingCheatsheet() {
 // ─── EXPORTAR GUION ───────────────────────────────────────────────────────────
 function exportGuion() {
   const lines = [
-    '=== GUION BlueIA — VISITA A MAURICIO · Imperio del Este, Salinas ===',
-    '',
+    '=== GUION BlueIA — VISITA A MAURICIO · Imperio del Este, Salinas ===', '',
     ...cheatsheetData.map(d => [`[ ${d.phase} ]`, d.text, ''].join('\n')),
-    '--- Objections quick-guide ---',
-    '"No tengo tiempo"     → "Justo de eso se trata. BlueIA le devuelve tiempo. ¿5 minutos más?"',
-    '"Debe ser caro"       → "El primer mes es diagnóstico. El costo es de una app de celular."',
-    '"No entiendo de IA"   → "No necesita entenderla. Igual que no entiende cómo funciona su freezer."',
-    '',
+    '--- Objeciones rápidas ---',
+    '"No tengo tiempo"   → "Justo de eso se trata. BlueIA le devuelve tiempo. ¿5 minutos más?"',
+    '"Debe ser caro"     → "El primer mes es diagnóstico. El costo es de una app de celular."',
+    '"No entiendo de IA" → "No necesita entenderla. Igual que no entiende cómo funciona su freezer."', '',
     `Generado: ${new Date().toLocaleString('es-UY')} · Sesión #${state.sessionCount}`
   ];
   const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
-  a.href     = url;
-  a.download = 'guion-mauricio-blueia.txt';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  a.href = url; a.download = 'guion-mauricio-blueia.txt';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -781,15 +788,12 @@ function updateScoreBadge() {
   const toggle = document.getElementById('themeToggle');
   let theme    = html.getAttribute('data-theme') || 'dark';
   html.setAttribute('data-theme', theme);
-  if (toggle) {
-    toggle.addEventListener('click', () => {
-      theme = theme === 'dark' ? 'light' : 'dark';
-      html.setAttribute('data-theme', theme);
-    });
-  }
+  if (toggle) toggle.addEventListener('click', () => {
+    theme = theme === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', theme);
+  });
   buildCheatsheet();
   updateSessionCounter();
-  populateVoicePicker();
-  setTimeout(populateVoicePicker, 500);
-  setTimeout(populateVoicePicker, 1500);
+  // Iniciar Kokoro en background (no bloquea la UI)
+  initKokoro();
 })();
