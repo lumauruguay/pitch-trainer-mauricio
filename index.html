@@ -59,6 +59,67 @@
     }
     .obj-q { color: var(--color-warning); font-weight: 600; }
     .obj-a { color: var(--color-text-muted); }
+
+    /* ── PANEL DE VOZ ── */
+    .voice-config-panel {
+      width: 100%;
+      max-width: 480px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-4) var(--space-5);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+    }
+    .voice-config-panel label {
+      font-size: var(--text-sm);
+      color: var(--color-text-muted);
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .voice-config-panel label span.badge-enhanced {
+      font-size: 0.65rem;
+      background: var(--color-primary);
+      color: white;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+    #voicePicker {
+      width: 100%;
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-md);
+      border: 1px solid var(--color-border);
+      background: var(--color-surface-2);
+      color: var(--color-text);
+      font-size: var(--text-sm);
+      font-family: var(--font-body, sans-serif);
+      cursor: pointer;
+    }
+    .voice-hint {
+      font-size: 0.7rem;
+      color: var(--color-text-faint);
+      line-height: 1.5;
+    }
+    .btn-preview-voice {
+      font-size: var(--text-xs);
+      padding: var(--space-1) var(--space-3);
+      border-radius: var(--radius-full);
+      border: 1px solid var(--color-primary);
+      color: var(--color-primary);
+      background: transparent;
+      cursor: pointer;
+      transition: all 180ms ease;
+      align-self: flex-start;
+    }
+    .btn-preview-voice:hover {
+      background: var(--color-primary);
+      color: white;
+    }
   </style>
 </head>
 <body>
@@ -112,6 +173,23 @@
         <span class="tag">GAME</span>
       </div>
       <p class="welcome-desc">Practicá el pitch completo con voz. Mauricio responde como el dueño real. Feedback inmediato basado en Priestley y Meléndez.</p>
+
+      <!-- ── PANEL DE VOZ (NUEVO) ── -->
+      <div class="voice-config-panel">
+        <label for="voicePicker">
+          🔊 Voz de Mauricio
+          <span class="badge-enhanced">⭐ Enhanced = mejor calidad</span>
+        </label>
+        <select id="voicePicker">
+          <option value="">Cargando voces...</option>
+        </select>
+        <button class="btn-preview-voice" onclick="previewVoice()">▶ Probar voz seleccionada</button>
+        <p class="voice-hint">
+          Las voces marcadas con ⭐ son Enhanced/Premium (instaladas en tu Mac).<br>
+          Si no ves ninguna, abrí <strong>Preferencias del Sistema → Accesibilidad → Contenido hablado</strong> y descargá una voz en español.
+        </p>
+      </div>
+
       <div class="difficulty-section">
         <p class="difficulty-label">Elegí la personalidad de Mauricio:</p>
         <div class="difficulty-grid">
@@ -325,5 +403,19 @@
 </div>
 
 <script src="script.js"></script>
+<script>
+  // Función de preview para el botón "Probar voz seleccionada"
+  function previewVoice() {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utt = new SpeechSynthesisUtterance('Hola, soy Mauricio del Imperio del Este. Decime, ¿en qué le puedo ayudar?');
+    utt.lang = 'es-UY';
+    utt.rate = 0.95;
+    utt.pitch = 0.9;
+    const voice = getBestSpanishVoice();
+    if (voice) utt.voice = voice;
+    window.speechSynthesis.speak(utt);
+  }
+</script>
 </body>
 </html>
