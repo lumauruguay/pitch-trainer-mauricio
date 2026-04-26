@@ -1,5 +1,5 @@
-// BlueIA Pitch Trainer — Lógica principal
-// Árbol de decisiones NAME/SAME/FRAME/AIM/GAME para visita a Mauricio (Imperio del Este)
+// BlueIA Pitch Trainer — Lógica principal v2 (Opción C: Modo intensivo lunes)
+// Árbol NAME/SAME/FRAME/AIM/GAME para visita a Mauricio (Imperio del Este)
 
 // ─── ESTADO GLOBAL ───────────────────────────────────────────────────────────
 const state = {
@@ -16,7 +16,12 @@ const state = {
   isSpeaking: false,
   speechRecognition: null,
   currentOptions: [],
-  sessionLog: []
+  sessionLog: [],
+  // Modo intensivo
+  sessionCount: 0,
+  allSessionsLog: [],
+  phaseHistory: { name: [], same: [], frame: [], aim: [], game: [] },
+  unlockedDifficult: false
 };
 const phases = ['name', 'same', 'frame', 'aim', 'game'];
 
@@ -191,31 +196,12 @@ const arbol = {
 
 // ─── PERSONALIDADES DE MAURICIO ───────────────────────────────────────────────
 const personalities = {
-  curioso: {
-    name: 'Curioso',
-    responseStyle: (arr) => arr.find(m => m.type === 'curioso') || arr[0],
-    interrupt: false
-  },
-  ocupado: {
-    name: 'Ocupado',
-    responseStyle: (arr) => arr.find(m => m.type === 'ocupado') || arr[0],
-    interrupt: true
-  },
-  esceptico: {
-    name: 'Escéptico',
-    responseStyle: (arr) => arr.find(m => m.type === 'esceptico') || arr[0],
-    interrupt: false
-  },
-  economico: {
-    name: 'Economista',
-    responseStyle: (arr) => arr.find(m => m.type === 'economico') || arr[0],
-    interrupt: false
-  },
-  abierto: {
-    name: 'Abierto',
-    responseStyle: (arr) => arr.find(m => m.type === 'abierto') || arr[0],
-    interrupt: false
-  }
+  curioso:   { name: 'Curioso',    responseStyle: (arr) => arr.find(m => m.type === 'curioso')   || arr[0], interrupt: false },
+  ocupado:   { name: 'Ocupado',    responseStyle: (arr) => arr.find(m => m.type === 'ocupado')   || arr[0], interrupt: true  },
+  esceptico: { name: 'Escéptico',  responseStyle: (arr) => arr.find(m => m.type === 'esceptico') || arr[0], interrupt: false },
+  economico: { name: 'Economista', responseStyle: (arr) => arr.find(m => m.type === 'economico') || arr[0], interrupt: false },
+  abierto:   { name: 'Abierto',    responseStyle: (arr) => arr.find(m => m.type === 'abierto')   || arr[0], interrupt: false },
+  dificil:   { name: '😤 Difícil', responseStyle: (arr) => arr.find(m => m.type === 'esceptico') || arr[arr.length-1], interrupt: true }
 };
 
 // ─── WEB SPEECH API ───────────────────────────────────────────────────────────
@@ -228,18 +214,12 @@ if (SpeechRecognition) {
   recognition.interimResults = true;
   recognition.onresult = (e) => {
     const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
-    document.getElementById('transcriptText').textContent = transcript;
-    if (e.results[e.results.length - 1].isFinal) {
-      handleVoiceInput(transcript);
-    }
+    const el = document.getElementById('transcriptText');
+    if (el) el.textContent = transcript;
+    if (e.results[e.results.length - 1].isFinal) handleVoiceInput(transcript);
   };
-  recognition.onend = () => {
-    if (state.isListening) stopListening();
-  };
-  recognition.onerror = (e) => {
-    console.warn('Speech error:', e.error);
-    stopListening();
-  };
+  recognition.onend = () => { if (state.isListening) stopListening(); };
+  recognition.onerror = (e) => { console.warn('Speech error:', e.error); stopListening(); };
 }
 
 function speakText(text, onEnd) {
@@ -249,27 +229,28 @@ function speakText(text, onEnd) {
   utt.lang = 'es-UY';
   utt.rate = 0.95;
   utt.pitch = 0.9;
-  // Intentar voz masculina en español
   const voices = window.speechSynthesis.getVoices();
   const esVoice = voices.find(v => v.lang.startsWith('es') && v.name.toLowerCase().includes('male'))
-    || voices.find(v => v.lang.startsWith('es'))
-    || voices[0];
+    || voices.find(v => v.lang.startsWith('es')) || voices[0];
   if (esVoice) utt.voice = esVoice;
   utt.onstart = () => {
-    document.getElementById('speakingRing').classList.add('active');
-    document.getElementById('speakingLabel').textContent = '🔊 Hablando...';
+    const ring = document.getElementById('speakingRing');
+    const lbl  = document.getElementById('speakingLabel');
+    if (ring) ring.classList.add('active');
+    if (lbl)  lbl.textContent = '🔊 Hablando...';
     state.isSpeaking = true;
   };
   utt.onend = () => {
-    document.getElementById('speakingRing').classList.remove('active');
-    document.getElementById('speakingLabel').textContent = '🔊 Listo';
+    const ring = document.getElementById('speakingRing');
+    const lbl  = document.getElementById('speakingLabel');
+    if (ring) ring.classList.remove('active');
+    if (lbl)  lbl.textContent = '🔊 Listo';
     state.isSpeaking = false;
     if (onEnd) onEnd();
   };
   window.speechSynthesis.speak(utt);
 }
 
-// Cargar voces (asíncrono en algunos browsers)
 if (window.speechSynthesis) {
   window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
 }
@@ -277,7 +258,8 @@ if (window.speechSynthesis) {
 // ─── NAVEGACIÓN ───────────────────────────────────────────────────────────────
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
+  const el = document.getElementById(id);
+  if (el) el.classList.add('active');
   window.scrollTo(0, 0);
 }
 
@@ -288,68 +270,92 @@ function selectDifficulty(btn) {
 }
 
 function startTraining() {
+  state.sessionCount++;
+  updateSessionCounter();
+  // Desbloquear modo difícil después de 3 sesiones
+  if (state.sessionCount >= 3 && !state.unlockedDifficult) {
+    state.unlockedDifficult = true;
+    unlockDifficultMode();
+  }
   resetState();
   showScreen('screenTraining');
   loadPhase('name');
 }
 
+function unlockDifficultMode() {
+  const grid = document.querySelector('.difficulty-grid');
+  if (!grid || document.querySelector('[data-difficulty="dificil"]')) return;
+  const btn = document.createElement('button');
+  btn.className = 'diff-btn';
+  btn.dataset.difficulty = 'dificil';
+  btn.setAttribute('onclick', 'selectDifficulty(this)');
+  btn.innerHTML = `<span class="diff-emoji">😤</span><span class="diff-name">Difícil</span><span class="diff-desc">Desbloqueado · 3 sesiones</span>`;
+  grid.appendChild(btn);
+}
+
+function updateSessionCounter() {
+  const el = document.getElementById('sessionCounter');
+  if (el) el.textContent = 'Sesión #' + state.sessionCount + ' del día';
+}
+
 function resetState() {
   state.currentPhase = 'name';
   state.phaseIndex = 0;
-  state.scores = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
-  state.attempts = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
+  state.scores    = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
+  state.attempts  = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
   state.totalScore = 0;
-  state.streak = 0;
+  state.streak     = 0;
   state.sessionLog = [];
   updateScoreBadge();
-  // Reset sidebar phases
   phases.forEach(p => {
-    const el = document.getElementById('phase' + p.toUpperCase());
-    if (el) {
-      el.classList.remove('active', 'done');
-      document.getElementById('status' + p.toUpperCase()).textContent = '';
-    }
+    const el  = document.getElementById('phase' + p.toUpperCase());
+    const st  = document.getElementById('status' + p.toUpperCase());
+    if (el) el.classList.remove('active', 'done');
+    if (st) st.textContent = '';
   });
+  const sidebar = document.getElementById('sidebarScore');
+  const streak  = document.getElementById('sidebarStreak');
+  if (sidebar) sidebar.textContent = '0';
+  if (streak)  streak.textContent  = '🔥 0';
 }
 
 // ─── FASES ────────────────────────────────────────────────────────────────────
 function loadPhase(phase) {
   state.currentPhase = phase;
-  const data = arbol[phase];
-  const personality = personalities[state.difficulty];
+  const data        = arbol[phase];
+  const personality = personalities[state.difficulty] || personalities['curioso'];
 
-  // Update UI fase
-  document.getElementById('currentPhaseBadge').textContent = phase.toUpperCase();
+  const badge = document.getElementById('currentPhaseBadge');
+  if (badge) badge.textContent = phase.toUpperCase();
+
   phases.forEach(p => {
     const el = document.getElementById('phase' + p.toUpperCase());
-    if (el) {
-      el.classList.remove('active');
-      if (p === phase) el.classList.add('active');
-    }
+    if (el) { el.classList.remove('active'); if (p === phase) el.classList.add('active'); }
   });
 
-  // Seleccionar respuesta de Mauricio según personalidad
-  const mauricioMsg = personality.responseStyle(data.mauricio);
+  const mauricioMsg  = personality.responseStyle(data.mauricio);
   const mauricioText = mauricioMsg.text;
+  const mtEl = document.getElementById('mauricioText');
+  if (mtEl) mtEl.textContent = mauricioText;
 
-  // Mostrar burbuja
-  document.getElementById('mauricioText').textContent = mauricioText;
-  document.getElementById('feedbackArea').style.display = 'none';
-  document.getElementById('contextTip').style.display = 'flex';
-  document.getElementById('contextTipText').textContent = data.hint;
+  const fb = document.getElementById('feedbackArea');
+  if (fb) fb.style.display = 'none';
+  const tip = document.getElementById('contextTip');
+  if (tip) { tip.style.display = 'flex'; }
+  const tipText = document.getElementById('contextTipText');
+  if (tipText) tipText.textContent = data.hint;
 
-  // Leer en voz alta
   speakText(mauricioText);
 
-  // Shuffle y mostrar opciones
   const opts = [...data.options].sort(() => Math.random() - 0.5);
   state.currentOptions = opts;
   renderOptions(opts);
 }
 
 function renderOptions(opts) {
-  const grid = document.getElementById('optionsGrid');
+  const grid   = document.getElementById('optionsGrid');
   const labels = ['A', 'B', 'C'];
+  if (!grid) return;
   grid.innerHTML = opts.map((opt, i) => `
     <button class="option-btn" onclick="selectOption(${i})">
       <span class="option-label">${labels[i]}</span>
@@ -365,52 +371,45 @@ function selectOption(index) {
 }
 
 function processChoice(opt) {
-  // Deshabilitar opciones
   document.querySelectorAll('.option-btn').forEach(b => b.disabled = true);
 
   const isCorrect = opt.quality === 'perfect';
-  const isOk = opt.quality === 'ok';
+  const isOk      = opt.quality === 'ok';
+  let points = isCorrect ? 3 : isOk ? 1 : 0;
 
-  // Score
-  let points = 0;
-  if (isCorrect) points = 3;
-  else if (isOk) points = 1;
   state.scores[state.currentPhase] += points;
   state.totalScore += points;
+  if (isCorrect) { state.streak++; state.bestStreak = Math.max(state.streak, state.bestStreak); }
+  else state.streak = 0;
 
-  // Streak
-  if (isCorrect) {
-    state.streak++;
-    state.bestStreak = Math.max(state.streak, state.bestStreak);
-  } else {
-    state.streak = 0;
-  }
+  // Registrar en historial de fases
+  state.phaseHistory[state.currentPhase].push(opt.quality);
 
-  // Log
   state.sessionLog.push({ phase: state.currentPhase, quality: opt.quality, text: opt.text });
 
-  // Update scores
   updateScoreBadge();
-  document.getElementById('sidebarScore').textContent = state.totalScore;
-  document.getElementById('sidebarStreak').textContent = '🔥 ' + state.streak;
+  const sS = document.getElementById('sidebarScore');
+  const sT = document.getElementById('sidebarStreak');
+  if (sS) sS.textContent = state.totalScore;
+  if (sT) sT.textContent = '🔥 ' + state.streak;
 
-  // Mostrar feedback
-  const fb = document.getElementById('feedbackArea');
+  const fb  = document.getElementById('feedbackArea');
   const fbc = document.getElementById('feedbackContent');
-  fb.style.display = 'block';
-  fbc.className = 'feedback-content ' + (isCorrect ? 'success' : isOk ? 'warning' : 'error');
-  fbc.innerHTML = `<strong>${opt.feedback}</strong><div class="feedback-quote">${opt.quote}</div>`;
+  if (fb && fbc) {
+    fb.style.display = 'block';
+    fbc.className    = 'feedback-content ' + (isCorrect ? 'success' : isOk ? 'warning' : 'error');
+    fbc.innerHTML    = `<strong>${opt.feedback}</strong><div class="feedback-quote">${opt.quote}</div>`;
+  }
 
-  // Respuesta de Mauricio después de nuestra elección
   if (opt.nextMauricio) {
     setTimeout(() => {
-      document.getElementById('mauricioText').textContent = opt.nextMauricio;
+      const el = document.getElementById('mauricioText');
+      if (el) el.textContent = opt.nextMauricio;
       speakText(opt.nextMauricio);
     }, 1500);
   }
 
-  // Marcar fase en sidebar
-  const phaseEl = document.getElementById('phase' + state.currentPhase.toUpperCase());
+  const phaseEl  = document.getElementById('phase' + state.currentPhase.toUpperCase());
   const statusEl = document.getElementById('status' + state.currentPhase.toUpperCase());
   if (phaseEl && statusEl) {
     phaseEl.classList.remove('active');
@@ -418,143 +417,159 @@ function processChoice(opt) {
     statusEl.textContent = isCorrect ? '✅' : isOk ? '⚠️' : '❌';
   }
 
-  // Avanzar a la siguiente fase
   setTimeout(() => {
     const nextIndex = phases.indexOf(state.currentPhase) + 1;
-    if (nextIndex < phases.length) {
-      loadPhase(phases[nextIndex]);
-    } else {
-      showResults();
-    }
+    if (nextIndex < phases.length) loadPhase(phases[nextIndex]);
+    else showResults();
   }, isCorrect ? 2500 : 3500);
 }
 
 // ─── VOZ ──────────────────────────────────────────────────────────────────────
 function toggleVoice() {
-  if (state.isListening) {
-    stopListening();
-  } else {
-    startListening();
-  }
+  state.isListening ? stopListening() : startListening();
 }
 
 function startListening() {
-  if (!recognition) {
-    alert('Tu navegador no soporta reconocimiento de voz. Usá Chrome o Safari.');
-    return;
-  }
+  if (!recognition) { alert('Tu navegador no soporta reconocimiento de voz. Usá Chrome o Safari.'); return; }
   state.isListening = true;
   const btn = document.getElementById('btnVoice');
-  btn.classList.add('listening');
-  document.getElementById('voiceLabel').textContent = 'Escuchando...';
-  document.getElementById('voiceTranscript').style.display = 'flex';
-  document.getElementById('transcriptText').textContent = 'Esperando...';
+  const lbl = document.getElementById('voiceLabel');
+  const vt  = document.getElementById('voiceTranscript');
+  const tt  = document.getElementById('transcriptText');
+  if (btn) btn.classList.add('listening');
+  if (lbl) lbl.textContent = 'Escuchando...';
+  if (vt)  vt.style.display = 'flex';
+  if (tt)  tt.textContent   = 'Esperando...';
   try { recognition.start(); } catch(e) { console.warn(e); }
 }
 
 function stopListening() {
   state.isListening = false;
   const btn = document.getElementById('btnVoice');
-  btn.classList.remove('listening');
-  document.getElementById('voiceLabel').textContent = 'Hablar';
-  document.getElementById('voiceTranscript').style.display = 'none';
+  const lbl = document.getElementById('voiceLabel');
+  const vt  = document.getElementById('voiceTranscript');
+  if (btn) btn.classList.remove('listening');
+  if (lbl) lbl.textContent  = 'Hablar';
+  if (vt)  vt.style.display = 'none';
   try { recognition.stop(); } catch(e) {}
 }
 
 function handleVoiceInput(transcript) {
   stopListening();
-  // Comparar con opciones disponibles por similitud
   const t = transcript.toLowerCase();
-  let bestMatch = null;
-  let bestScore = 0;
+  let bestMatch = null, bestScore = 0;
   state.currentOptions.forEach((opt, i) => {
-    const words = opt.text.toLowerCase().split(' ');
-    let matches = 0;
+    const words   = opt.text.toLowerCase().split(' ');
+    let matches   = 0;
     words.forEach(w => { if (t.includes(w) && w.length > 4) matches++; });
-    const score = matches / Math.max(words.length, 1);
+    const score   = matches / Math.max(words.length, 1);
     if (score > bestScore) { bestScore = score; bestMatch = i; }
   });
-  if (bestScore > 0.15 && bestMatch !== null) {
+  if (bestScore > 0.12 && bestMatch !== null) {
     selectOption(bestMatch);
   } else {
-    // Ninguna coincidencia — mostrar transcripción y pedir elegir
-    document.getElementById('responseLabel').textContent = '"' + transcript.substring(0,60) + '..." — Elegí la opción más cercana:';
+    const rl = document.getElementById('responseLabel');
+    if (rl) rl.textContent = '"' + transcript.substring(0, 60) + '..." — Elegí la opción más cercana:';
   }
 }
 
 function toggleVoiceChat() {
   state.isVoiceChatMode = !state.isVoiceChatMode;
   const btn = document.getElementById('btnVoiceChat');
-  const label = document.getElementById('voiceChatLabel');
+  const lbl = document.getElementById('voiceChatLabel');
   if (state.isVoiceChatMode) {
-    btn.classList.add('active');
-    label.textContent = '🎤 Modo voz activo — hablá libremente';
+    if (btn) btn.classList.add('active');
+    if (lbl) lbl.textContent = '🎤 Modo voz activo — hablá libremente';
     startListening();
   } else {
-    btn.classList.remove('active');
-    label.textContent = 'Modo voz libre';
+    if (btn) btn.classList.remove('active');
+    if (lbl) lbl.textContent = 'Modo voz libre';
     stopListening();
   }
 }
 
 function repeatMauricio() {
-  const text = document.getElementById('mauricioText').textContent;
-  speakText(text);
+  const el = document.getElementById('mauricioText');
+  if (el) speakText(el.textContent);
+}
+
+// ─── PROGRESO ACUMULADO ───────────────────────────────────────────────────────
+function calcPhaseAvg(phase) {
+  const hist = state.phaseHistory[phase];
+  if (!hist.length) return null;
+  const sum = hist.reduce((a, q) => a + (q === 'perfect' ? 3 : q === 'ok' ? 1 : 0), 0);
+  return Math.round((sum / (hist.length * 3)) * 100);
+}
+
+function buildCumulativeStats() {
+  return phases.map(p => {
+    const avg = calcPhaseAvg(p);
+    const sessions = state.phaseHistory[p].length;
+    return { phase: p, avg, sessions };
+  });
 }
 
 // ─── RESULTADOS ───────────────────────────────────────────────────────────────
 function showResults() {
   showScreen('screenResults');
 
-  const total = state.totalScore;
+  const total    = state.totalScore;
   const maxScore = phases.length * 3;
-  const pct = Math.round((total / maxScore) * 100);
+  const pct      = Math.round((total / maxScore) * 100);
 
-  // Icono según puntaje
   let icon = '🏆', title = '¡Pitch dominado!', subtitle = 'Estás listo para el lunes.';
-  if (pct < 40) { icon = '😅'; title = 'Hay que practicar más'; subtitle = 'Repetí el entrenamiento antes del lunes.'; }
+  if (pct < 40) { icon = '😅'; title = 'Hay que practicar más';   subtitle = 'Repetí antes del lunes.'; }
   else if (pct < 70) { icon = '💪'; title = '¡Buen progreso!'; subtitle = 'Enfocate en las fases débiles.'; }
 
-  document.getElementById('resultsIcon').textContent = icon;
-  document.getElementById('resultsTitle').textContent = title;
-  document.getElementById('resultsSubtitle').textContent = subtitle;
+  const rIcon = document.getElementById('resultsIcon');
+  const rTitle = document.getElementById('resultsTitle');
+  const rSub   = document.getElementById('resultsSubtitle');
+  if (rIcon)  rIcon.textContent  = icon;
+  if (rTitle) rTitle.textContent = title;
+  if (rSub)   rSub.textContent   = subtitle;
+
   updateScoreBadge();
 
-  // Cards por fase
   const grid = document.getElementById('resultsGrid');
-  grid.innerHTML = phases.map(p => {
-    const s = state.scores[p];
-    const cls = s >= 3 ? 'good' : s >= 1 ? 'ok' : 'bad';
-    const label = s >= 3 ? 'Perfecto' : s >= 1 ? 'Mejorable' : 'Repasar';
-    return `<div class="result-card">
-      <div class="result-phase">${p.toUpperCase()}</div>
-      <div class="result-score ${cls}">${s >= 3 ? '✅' : s >= 1 ? '⚠️' : '❌'}</div>
-      <div class="result-label">${label}</div>
-    </div>`;
-  }).join('');
+  if (grid) {
+    grid.innerHTML = phases.map(p => {
+      const s   = state.scores[p];
+      const avg = calcPhaseAvg(p);
+      const cls = s >= 3 ? 'good' : s >= 1 ? 'ok' : 'bad';
+      const lbl = s >= 3 ? 'Perfecto' : s >= 1 ? 'Mejorable' : 'Repasar';
+      const trendHtml = avg !== null
+        ? `<div class="result-trend">${avg}% histórico (${state.phaseHistory[p].length} ses.)</div>`
+        : '';
+      return `<div class="result-card">
+        <div class="result-phase">${p.toUpperCase()}</div>
+        <div class="result-score ${cls}">${s >= 3 ? '✅' : s >= 1 ? '⚠️' : '❌'}</div>
+        <div class="result-label">${lbl}</div>
+        ${trendHtml}
+      </div>`;
+    }).join('');
+  }
 
-  // Resumen
   const weak = phases.filter(p => state.scores[p] < 3).map(p => p.toUpperCase());
-  document.getElementById('resultsSummary').innerHTML = `
-    <strong>Puntaje total: ${total}/${maxScore} (${pct}%)</strong><br>
-    Mejor racha: 🔥 ${state.bestStreak} decisiones correctas<br>
+  const rSum = document.getElementById('resultsSummary');
+  if (rSum) rSum.innerHTML = `
+    <strong>Sesión #${state.sessionCount} · Puntaje: ${total}/${maxScore} (${pct}%)</strong><br>
+    Mejor racha hoy: 🔥 ${state.bestStreak} decisiones correctas<br>
     ${weak.length ? '<br>⚠️ Fases a repasar: <strong>' + weak.join(', ') + '</strong>' : '✅ Todas las fases dominadas'}
+    ${state.sessionCount >= 3 ? '<br>🔓 Modo <strong>Difícil</strong> desbloqueado.' : ''}
   `;
 
-  // Recomendación
   let rec = '💡 ';
-  if (pct >= 80) rec += 'Estás listo. Mauricio te va a escuchar. Confiá en tu NAME y tu FRAME.';
-  else if (pct >= 50) rec += 'Repetí especialmente ' + (weak[0] || 'FRAME') + '. Es tu fase más débil para el lunes.';
-  else rec += 'Practicá 3 sesiones más antes del lunes. Enfocate en el SAME — es donde más se gana o se pierde.';
-  document.getElementById('resultsRecommendation').textContent = rec;
+  if (pct >= 80)      rec += 'Estás listo. Mauricio te va a escuchar. Confiá en tu NAME y tu FRAME.';
+  else if (pct >= 50) rec += 'Repetí especialmente ' + (weak[0] || 'FRAME') + '. Es tu fase más débil.';
+  else                rec += 'Practicá 3 sesiones más. Enfocate en el SAME — donde más se gana o pierde.';
 
-  // Llenar cheatsheet
+  const rRec = document.getElementById('resultsRecommendation');
+  if (rRec) rRec.textContent = rec;
+
   buildCheatsheet();
 }
 
-function restartSameConfig() {
-  startTraining();
-}
+function restartSameConfig() { startTraining(); }
 
 // ─── CHEATSHEET ───────────────────────────────────────────────────────────────
 const cheatsheetData = [
@@ -572,57 +587,91 @@ const cheatsheetData = [
   },
   {
     phase: 'AIM',
-    text: 'En el primer mes: las consultas repetitivas de WhatsApp se responden solas. Tenés un tablero con tus números clave. Recibís alertas cuando algo se desvía. No tenés que estar en todo.'
+    text: 'En el primer mes: las consultas repetitivas de WhatsApp se responden solas. Tenés un tablero con tus números clave. Y recibís alertas cuando algo importante se desvía. No tenés que estar en todo.'
   },
   {
     phase: 'GAME',
-    text: 'Imperio ya es el referente en precio y cercanía. Yo quiero que sea el primer supermercado verdaderamente inteligente de Canelones. Con datos al nivel de Tienda Inglesa, a costo de PyME.'
+    text: 'Mi juego es que cualquier PyME de Canelones tome decisiones con la misma claridad que una gran cadena. Imperio ya es el referente en precio y cercanía. Yo quiero que sea también el primer supermercado verdaderamente inteligente de la zona. Nivel Tienda Inglesa, costo de PyME.'
   }
 ];
 
 function buildCheatsheet() {
-  const html = cheatsheetData.map(item => `
-    <h3>${item.phase}</h3>
-    <p>${item.text}</p>
+  const el  = document.getElementById('cheatsheet');
+  const fcC = document.getElementById('fcContent');
+  const html = cheatsheetData.map(d => `
+    <h3>${d.phase}</h3>
+    <p>${d.text}</p>
   `).join('');
-  document.getElementById('cheatsheet').innerHTML = html;
-  // Floating cheatsheet
-  const fcHtml = cheatsheetData.map(item => `
-    <div class="fc-phase">${item.phase}</div>
-    <div class="fc-text">${item.text}</div>
+  if (el)  el.innerHTML  = html;
+  if (fcC) fcC.innerHTML = cheatsheetData.map(d => `
+    <div class="fc-phase">${d.phase}</div>
+    <div class="fc-text">${d.text}</div>
   `).join('');
-  document.getElementById('fcContent').innerHTML = fcHtml;
 }
-buildCheatsheet(); // Construir desde el inicio
 
 function toggleCheatsheet() {
   const el = document.getElementById('cheatsheet');
+  if (!el) return;
   el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
 function toggleFloatingCheatsheet() {
   const el = document.getElementById('floatingCheatsheet');
+  if (!el) return;
   el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  if (el.style.display === 'block') buildCheatsheet();
 }
 
-// ─── SCORE BADGE ─────────────────────────────────────────────────────────────
+// ─── EXPORTAR GUION COMO TEXTO ────────────────────────────────────────────────
+function exportGuion() {
+  const lines = [
+    '=== GUION BlueIA — VISITA A MAURICIO · Imperio del Este, Salinas ===',
+    '',
+    ...cheatsheetData.map(d => [
+      `[ ${d.phase} ]`,
+      d.text,
+      ''
+    ].join('\n')),
+    '--- Objections quick-guide ---',
+    '"No tengo tiempo"     → "Justo de eso se trata. BlueIA le devuelve tiempo. ¿5 minutos más?"',
+    '"Debe ser caro"       → "El primer mes es diagnóstico. El costo es de una app de celular."',
+    '"No entiendo de IA"   → "No necesita entenderla. Igual que no entiende cómo funciona su freezer."',
+    '',
+    `Generado: ${new Date().toLocaleString('es-UY')} · Sesión #${state.sessionCount}`
+  ];
+  const text = lines.join('\n');
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'guion-mauricio-blueia.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
 function updateScoreBadge() {
-  document.getElementById('scoreBadge').textContent = 'Score: ' + state.totalScore;
+  const el = document.getElementById('scoreBadge');
+  if (el) el.textContent = 'Score: ' + state.totalScore;
 }
 
-// ─── THEME TOGGLE ────────────────────────────────────────────────────────────
-(function() {
-  const t = document.getElementById('themeToggle');
-  const r = document.documentElement;
-  let d = 'dark';
-  r.setAttribute('data-theme', d);
-  if (t) {
-    t.addEventListener('click', () => {
-      d = d === 'dark' ? 'light' : 'dark';
-      r.setAttribute('data-theme', d);
-      t.innerHTML = d === 'dark'
-        ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'
-        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>';
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+(function init() {
+  // Tema
+  const html  = document.documentElement;
+  const toggle = document.getElementById('themeToggle');
+  let theme    = html.getAttribute('data-theme') || 'dark';
+  html.setAttribute('data-theme', theme);
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      theme = theme === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', theme);
     });
   }
+  // Precargar cheatsheet en FAB
+  buildCheatsheet();
+  // Mostrar contador inicial
+  updateSessionCounter();
 })();
