@@ -14,14 +14,15 @@ const state = {
   isListening: false,
   isVoiceChatMode: false,
   isSpeaking: false,
-  recognitionActive: false,   // FIX BUG 1+2: guard de estado real del objeto
+  recognitionActive: false,
   speechRecognition: null,
   currentOptions: [],
   sessionLog: [],
   sessionCount: 0,
   allSessionsLog: [],
   phaseHistory: { name: [], same: [], frame: [], aim: [], game: [] },
-  unlockedDifficult: false
+  unlockedDifficult: false,
+  selectedVoiceName: null   // FIX: voz elegida manualmente por el usuario
 };
 const phases = ['name', 'same', 'frame', 'aim', 'game'];
 
@@ -204,8 +205,87 @@ const personalities = {
   dificil:   { name: '😤 Difícil', responseStyle: (arr) => arr.find(m => m.type === 'esceptico') || arr[arr.length-1], interrupt: true }
 };
 
+// ─── SELECCIÓN DE VOZ — FIX PRINCIPAL ────────────────────────────────────────
+// Apple Enhanced/Premium voices para español NO contienen "male" en su nombre.
+// (Mónica, Jorge, Luciana, Paulina, etc.)
+// Estrategia: buscar por nombre explícito primero, luego por calidad (enhanced/premium),
+// luego cualquier voz en español, luego primera disponible.
+
+function getBestSpanishVoice() {
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return null;
+
+  // Voces masculinas Enhanced/Premium de Apple (macOS/iOS) — en orden de preferencia
+  const preferredMaleNames = ['Jorge', 'Juan', 'Andrés', 'Diego', 'Carlos', 'Rodrigo'];
+  // Voces femeninas Enhanced/Premium como fallback secundario
+  const preferredFemaleNames = ['Mónica', 'Luciana', 'Paulina', 'Esperanza', 'Marisol'];
+
+  // Si el usuario eligió una voz manualmente, usarla
+  if (state.selectedVoiceName) {
+    const manual = voices.find(v => v.name === state.selectedVoiceName);
+    if (manual) return manual;
+  }
+
+  // 1) Voz masculina preferred con "enhanced" o "premium" en el nombre
+  for (const name of preferredMaleNames) {
+    const v = voices.find(v =>
+      v.name.toLowerCase().includes(name.toLowerCase()) &&
+      (v.name.toLowerCase().includes('enhanced') || v.name.toLowerCase().includes('premium'))
+    );
+    if (v) return v;
+  }
+
+  // 2) Cualquier voz preferred masculina (sin importar calidad)
+  for (const name of preferredMaleNames) {
+    const v = voices.find(v => v.name.toLowerCase().includes(name.toLowerCase()) && v.lang.startsWith('es'));
+    if (v) return v;
+  }
+
+  // 3) Cualquier voz en español con "enhanced" o "premium"
+  const enhanced = voices.find(v =>
+    v.lang.startsWith('es') &&
+    (v.name.toLowerCase().includes('enhanced') || v.name.toLowerCase().includes('premium'))
+  );
+  if (enhanced) return enhanced;
+
+  // 4) Fallback: primera voz en español disponible
+  const anyEs = voices.find(v => v.lang.startsWith('es'));
+  if (anyEs) return anyEs;
+
+  // 5) Última opción: primera voz del sistema
+  return voices[0];
+}
+
+// Poblar el selector de voces en la UI
+function populateVoicePicker() {
+  const select = document.getElementById('voicePicker');
+  if (!select) return;
+  const voices = window.speechSynthesis.getVoices();
+  const esVoices = voices.filter(v => v.lang.startsWith('es'));
+  if (!esVoices.length) return;
+
+  select.innerHTML = '<option value="">Auto (recomendado)</option>' +
+    esVoices.map(v =>
+      `<option value="${v.name}" ${state.selectedVoiceName === v.name ? 'selected' : ''}>
+        ${v.name} ${v.name.toLowerCase().includes('enhanced') || v.name.toLowerCase().includes('premium') ? '⭐' : ''}
+        (${v.lang})
+       </option>`
+    ).join('');
+
+  select.onchange = () => {
+    state.selectedVoiceName = select.value || null;
+    // Preview de la voz elegida
+    const utt = new SpeechSynthesisUtterance('Hola, soy Mauricio.');
+    utt.lang = 'es-UY';
+    utt.rate = 0.95;
+    const chosenVoice = getBestSpanishVoice();
+    if (chosenVoice) utt.voice = chosenVoice;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utt);
+  };
+}
+
 // ─── WEB SPEECH API ───────────────────────────────────────────────────────────
-// FIX BUG 2: instancia única reutilizable, nunca se recrea mid-session
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
 
@@ -226,14 +306,9 @@ if (SpeechRecognition) {
     if (e.results[e.results.length - 1].isFinal) handleVoiceInput(transcript);
   };
 
-  // FIX BUG 1: onend ya NO llama a stopListening() en loop.
-  // Solo actualiza el flag interno. La UI se limpia sólo si isListening
-  // todavía está activo (es decir, el browser cortó solo, no el usuario).
   recognition.onend = () => {
     state.recognitionActive = false;
     if (state.isListening) {
-      // El browser terminó solo (timeout natural con continuous=false)
-      // Actualizamos UI sin llamar a recognition.stop() sobre objeto muerto
       _cleanupListeningUI();
       state.isListening = false;
     }
@@ -247,16 +322,14 @@ if (SpeechRecognition) {
   };
 }
 
-// FIX BUG 3: speakText con debounce y guard para evitar cancel()+speak() en ráfaga
+// ─── speakText — usa getBestSpanishVoice() ────────────────────────────────────
 let _speakDebounceTimer = null;
 
 function speakText(text, onEnd) {
   if (!window.speechSynthesis) { if (onEnd) onEnd(); return; }
 
-  // Cancelar debounce previo si llega otro en < 80ms (doble click trackpad)
   clearTimeout(_speakDebounceTimer);
   _speakDebounceTimer = setTimeout(() => {
-    // cancel() seguro: solo si hay algo hablando
     if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
       window.speechSynthesis.cancel();
     }
@@ -266,12 +339,9 @@ function speakText(text, onEnd) {
     utt.rate  = 0.95;
     utt.pitch = 0.9;
 
-    // Elegir voz española disponible
-    const voices  = window.speechSynthesis.getVoices();
-    const esVoice = voices.find(v => v.lang.startsWith('es') && v.name.toLowerCase().includes('male'))
-      || voices.find(v => v.lang.startsWith('es'))
-      || voices[0];
-    if (esVoice) utt.voice = esVoice;
+    // FIX: usar selector inteligente en lugar de .includes('male')
+    const voice = getBestSpanishVoice();
+    if (voice) utt.voice = voice;
 
     utt.onstart = () => {
       const ring = document.getElementById('speakingRing');
@@ -296,11 +366,14 @@ function speakText(text, onEnd) {
     };
 
     window.speechSynthesis.speak(utt);
-  }, 80); // debounce: ignora clicks dobles < 80ms
+  }, 80);
 }
 
 if (window.speechSynthesis) {
-  window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+  window.speechSynthesis.onvoiceschanged = () => {
+    window.speechSynthesis.getVoices();
+    populateVoicePicker(); // FIX: repoblar el picker cuando las voces cargan
+  };
 }
 
 // ─── HELPERS DE UI DE VOZ ────────────────────────────────────────────────────
@@ -356,7 +429,6 @@ function updateSessionCounter() {
 }
 
 function resetState() {
-  // FIX: detener voz activa al resetear
   stopListening();
   if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) {
     window.speechSynthesis.cancel();
@@ -495,7 +567,6 @@ function startListening() {
     alert('Tu navegador no soporta reconocimiento de voz. Usá Chrome o Safari.');
     return;
   }
-  // FIX BUG 2: guard — no llamar start() si ya está activo
   if (state.recognitionActive) return;
 
   state.isListening = true;
@@ -511,7 +582,6 @@ function startListening() {
   try {
     recognition.start();
   } catch (e) {
-    // InvalidStateError: ya estaba corriendo (raza de trackpad)
     state.isListening = false;
     _cleanupListeningUI();
     console.warn('recognition.start() error (ignorado):', e.message);
@@ -522,8 +592,6 @@ function stopListening() {
   if (!state.isListening) return;
   state.isListening = false;
   _cleanupListeningUI();
-
-  // FIX BUG 1: solo llamar stop() si el objeto realmente está activo
   if (state.recognitionActive) {
     try { recognition.stop(); } catch (e) {}
   }
@@ -746,4 +814,6 @@ function updateScoreBadge() {
   }
   buildCheatsheet();
   updateSessionCounter();
+  // Poblar picker de voces (puede ya estar cargado o esperar al evento)
+  populateVoicePicker();
 })();
