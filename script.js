@@ -206,18 +206,31 @@ const personalities = {
 };
 
 // ─── SELECCIÓN DE VOZ ─────────────────────────────────────────────────────────
-// Voces confirmadas en tu macOS Ventura (resultado consola Safari):
-// Masculinas es-MX: Reed (17), Rocko (10), Eddy (14), Grandpa (18)
-// Masculinas es-ES: Reed (9), Rocko (3), Eddy (8), Grandpa (4)
-// Prioridad: Reed es-MX → Rocko es-MX → Eddy es-MX → Grandpa es-MX → cualquier masculina → cualquier español
+// Voces confirmadas en macOS Ventura vía consola Safari:
+// es-MX disponibles: Rocko, Paulina (x2 — la segunda es Siri Voz 1 Enhanced), Flo,
+//                    Sandy, Eddy, Shelley, Grandma, Reed, Grandpa
+// PRIORIDAD: Paulina es-MX Enhanced (Siri Voz 1, última de duplicados)
+//            → Reed es-MX → Rocko es-MX → Eddy es-MX → Grandpa es-MX
 
-// Mapa de género por nombre (voces Apple confirmadas)
+// Nota: Paulina es nombre femenino pero corresponde a Siri Voz 1 (voz masculina/neutral
+// de alta calidad descargada por el usuario). Se la trata como preferida.
 const MALE_VOICE_NAMES   = ['reed', 'rocko', 'eddy', 'grandpa', 'jorge', 'juan', 'diego', 'carlos'];
-const FEMALE_VOICE_NAMES = ['shelley', 'grandma', 'sandy', 'flo', 'mónica', 'monica', 'paulina'];
+const FEMALE_VOICE_NAMES = ['shelley', 'grandma', 'sandy', 'flo', 'mónica', 'monica'];
+// Paulina se excluye de ambas listas — se la prioriza directamente por nombre.
 
 function isMaleVoice(voice) {
   const n = voice.name.toLowerCase();
   return MALE_VOICE_NAMES.some(m => n.includes(m));
+}
+
+// Devuelve la Paulina Enhanced (última duplicada) si existe, o la única si hay una sola
+function getPaulinaEnhanced(voices) {
+  const paulinas = voices.filter(v =>
+    v.name.toLowerCase().includes('paulina') && v.lang === 'es-MX'
+  );
+  if (!paulinas.length) return null;
+  // Si hay dos, la segunda suele ser la Enhanced/Siri descargada
+  return paulinas[paulinas.length - 1];
 }
 
 function getBestSpanishVoice() {
@@ -233,27 +246,31 @@ function getBestSpanishVoice() {
   const esVoices = voices.filter(v => v.lang.startsWith('es'));
   if (!esVoices.length) return voices[0];
 
-  // 1) Reed es-MX (mejor voz masculina confirmada)
+  // 1) Paulina es-MX Enhanced = Siri Voz 1 (PRIORIDAD MÁXIMA)
+  const paulina = getPaulinaEnhanced(esVoices);
+  if (paulina) return paulina;
+
+  // 2) Reed es-MX
   const reedMX = esVoices.find(v => v.name.toLowerCase().includes('reed') && v.lang === 'es-MX');
   if (reedMX) return reedMX;
 
-  // 2) Rocko es-MX
+  // 3) Rocko es-MX
   const rockoMX = esVoices.find(v => v.name.toLowerCase().includes('rocko') && v.lang === 'es-MX');
   if (rockoMX) return rockoMX;
 
-  // 3) Eddy es-MX
+  // 4) Eddy es-MX
   const eddyMX = esVoices.find(v => v.name.toLowerCase().includes('eddy') && v.lang === 'es-MX');
   if (eddyMX) return eddyMX;
 
-  // 4) Grandpa es-MX
+  // 5) Grandpa es-MX
   const grandpaMX = esVoices.find(v => v.name.toLowerCase().includes('grandpa') && v.lang === 'es-MX');
   if (grandpaMX) return grandpaMX;
 
-  // 5) Cualquier masculina en español
+  // 6) Cualquier masculina en español
   const anyMale = esVoices.find(v => isMaleVoice(v));
   if (anyMale) return anyMale;
 
-  // 6) Fallback: primera voz en español
+  // 7) Fallback: primera voz en español
   return esVoices[0];
 }
 
@@ -268,8 +285,11 @@ function populateVoicePicker() {
     return;
   }
 
-  // Ordenar: masculinas primero, luego femeninas; es-MX antes que es-ES
+  // Ordenar: Paulina primero (Siri Voz 1), luego masculinas, luego femeninas
   const sorted = [...esVoices].sort((a, b) => {
+    const aPaulina = a.name.toLowerCase().includes('paulina') ? 0 : 1;
+    const bPaulina = b.name.toLowerCase().includes('paulina') ? 0 : 1;
+    if (aPaulina !== bPaulina) return aPaulina - bPaulina;
     const aMale = isMaleVoice(a) ? 0 : 1;
     const bMale = isMaleVoice(b) ? 0 : 1;
     if (aMale !== bMale) return aMale - bMale;
@@ -278,18 +298,37 @@ function populateVoicePicker() {
     return a.name.localeCompare(b.name);
   });
 
-  // Voz por defecto: Reed es-MX
   const defaultVoice = getBestSpanishVoice();
 
-  select.innerHTML = '<option value="">Auto (Reed es-MX recomendado)</option>' +
+  // Construir opciones — marcar Siri Voz 1 explícitamente
+  const paulinas = esVoices.filter(v => v.name.toLowerCase().includes('paulina') && v.lang === 'es-MX');
+  const sirVoice1 = paulinas.length > 0 ? paulinas[paulinas.length - 1] : null;
+
+  select.innerHTML = '<option value="">Auto (recomendado)</option>' +
     sorted.map(v => {
-      const gender  = isMaleVoice(v) ? '♂' : '♀';
-      const isLocal = v.localService ? '' : ' 🌐';
-      const isDefault = defaultVoice && v.name === defaultVoice.name && !state.selectedVoiceName;
-      return `<option value="${v.name}" ${isDefault ? 'selected' : ''}>
-        ${gender} ${v.name} (${v.lang})${isLocal}
-      </option>`;
+      const isSiri1  = sirVoice1 && v.name === sirVoice1.name &&
+                       v.lang === sirVoice1.lang &&
+                       sorted.indexOf(v) === sorted.lastIndexOf(sorted.find(x => x.name === v.name && x.lang === v.lang));
+      const label    = isSiri1 ? `⭐ ${v.name} (Siri Voz 1 · ${v.lang})` :
+                       isMaleVoice(v) ? `♂ ${v.name} (${v.lang})` :
+                       `♀ ${v.name} (${v.lang})`;
+      const isDefault = defaultVoice && v.name === defaultVoice.name &&
+                        !state.selectedVoiceName;
+      return `<option value="${v.name}" ${isDefault ? 'selected' : ''}>${label}</option>`;
     }).join('');
+
+  // Si la voz por defecto es Paulina Enhanced, preseleccionarla
+  if (defaultVoice && !state.selectedVoiceName) {
+    const opts = Array.from(select.options);
+    const match = opts.find(o => o.value === defaultVoice.name);
+    // Para el caso de dos Paulinas, seleccionar la última opción con ese nombre
+    const allPaulinaOpts = opts.filter(o => o.value.toLowerCase().includes('paulina'));
+    if (allPaulinaOpts.length > 1) {
+      allPaulinaOpts[allPaulinaOpts.length - 1].selected = true;
+    } else if (match) {
+      match.selected = true;
+    }
+  }
 
   select.onchange = () => {
     state.selectedVoiceName = select.value || null;
@@ -776,5 +815,9 @@ function updateScoreBadge() {
   }
   buildCheatsheet();
   updateSessionCounter();
+  // Primer intento de poblar el selector (Safari a veces ya tiene las voces al init)
   populateVoicePicker();
+  // Segunda llamada diferida — Safari carga las voces con retraso
+  setTimeout(populateVoicePicker, 500);
+  setTimeout(populateVoicePicker, 1500);
 })();
