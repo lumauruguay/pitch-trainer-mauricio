@@ -8,6 +8,58 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <style>
+    /* ── EXTRAS Opción C ── */
+    .session-counter {
+      font-size: var(--text-xs);
+      color: var(--color-text-faint);
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      padding: 2px 10px;
+      border-radius: 999px;
+      letter-spacing: 0.03em;
+    }
+    .result-trend {
+      font-size: 0.65rem;
+      color: var(--color-text-faint);
+      margin-top: 2px;
+    }
+    .export-bar {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      width: 100%;
+      max-width: 560px;
+      margin-top: -0.5rem;
+    }
+    .objections-panel {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-5);
+      width: 100%;
+      max-width: 560px;
+      text-align: left;
+      font-size: var(--text-sm);
+      line-height: 1.8;
+    }
+    .objections-panel h4 {
+      font-size: var(--text-sm);
+      font-weight: 700;
+      color: var(--color-primary);
+      margin-bottom: var(--space-3);
+    }
+    .objection-row {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.3rem 0.75rem;
+      align-items: baseline;
+      margin-bottom: var(--space-2);
+    }
+    .obj-q { color: var(--color-warning); font-weight: 600; }
+    .obj-a { color: var(--color-text-muted); }
+  </style>
 </head>
 <body>
 
@@ -24,6 +76,7 @@
       <span class="logo-text">BlueIA <span class="logo-sub">Pitch Trainer</span></span>
     </div>
     <div class="header-actions">
+      <span class="session-counter" id="sessionCounter">Sesión #0 del día</span>
       <div class="score-badge" id="scoreBadge">Score: 0</div>
       <button class="btn-icon" id="themeToggle" data-theme-toggle aria-label="Cambiar tema">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -58,7 +111,7 @@
         <span class="tag-arrow">→</span>
         <span class="tag">GAME</span>
       </div>
-      <p class="welcome-desc">Practicá el pitch completo con voz. Mauricio responde como el dueño real. Recibís feedback inmediato basado en Priestley y Meléndez.</p>
+      <p class="welcome-desc">Practicá el pitch completo con voz. Mauricio responde como el dueño real. Feedback inmediato basado en Priestley y Meléndez.</p>
       <div class="difficulty-section">
         <p class="difficulty-label">Elegí la personalidad de Mauricio:</p>
         <div class="difficulty-grid">
@@ -105,29 +158,19 @@
         <div class="progress-header">Tu progreso</div>
         <div class="phase-list" id="phaseList">
           <div class="phase-item" data-phase="name" id="phaseNAME">
-            <span class="phase-dot"></span>
-            <span class="phase-label">NAME</span>
-            <span class="phase-status" id="statusNAME"></span>
+            <span class="phase-dot"></span><span class="phase-label">NAME</span><span class="phase-status" id="statusNAME"></span>
           </div>
           <div class="phase-item" data-phase="same" id="phaseSAME">
-            <span class="phase-dot"></span>
-            <span class="phase-label">SAME</span>
-            <span class="phase-status" id="statusSAME"></span>
+            <span class="phase-dot"></span><span class="phase-label">SAME</span><span class="phase-status" id="statusSAME"></span>
           </div>
           <div class="phase-item" data-phase="frame" id="phaseFRAME">
-            <span class="phase-dot"></span>
-            <span class="phase-label">FRAME</span>
-            <span class="phase-status" id="statusFRAME"></span>
+            <span class="phase-dot"></span><span class="phase-label">FRAME</span><span class="phase-status" id="statusFRAME"></span>
           </div>
           <div class="phase-item" data-phase="aim" id="phaseAIM">
-            <span class="phase-dot"></span>
-            <span class="phase-label">AIM</span>
-            <span class="phase-status" id="statusAIM"></span>
+            <span class="phase-dot"></span><span class="phase-label">AIM</span><span class="phase-status" id="statusAIM"></span>
           </div>
           <div class="phase-item" data-phase="game" id="phaseGAME">
-            <span class="phase-dot"></span>
-            <span class="phase-label">GAME</span>
-            <span class="phase-status" id="statusGAME"></span>
+            <span class="phase-dot"></span><span class="phase-label">GAME</span><span class="phase-status" id="statusGAME"></span>
           </div>
         </div>
         <div class="sidebar-score">
@@ -145,8 +188,6 @@
 
       <!-- Panel principal -->
       <div class="training-main">
-
-        <!-- Fase actual -->
         <div class="phase-badge" id="currentPhaseBadge">NAME</div>
 
         <!-- Burbuja de Mauricio -->
@@ -201,7 +242,6 @@
           </button>
           <span class="voice-chat-label" id="voiceChatLabel">Modo voz libre</span>
         </div>
-
       </div>
     </div>
   </section>
@@ -214,9 +254,12 @@
         <h2 id="resultsTitle">¡Sesión completada!</h2>
         <p id="resultsSubtitle">Así te fue en esta sesión:</p>
       </div>
+
       <div class="results-grid" id="resultsGrid"></div>
       <div class="results-summary" id="resultsSummary"></div>
       <div class="results-recommendation" id="resultsRecommendation"></div>
+
+      <!-- Acciones principales -->
       <div class="results-actions">
         <button class="btn btn-primary" onclick="restartSameConfig()">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.87"/></svg>
@@ -226,11 +269,41 @@
           Cambiar dificultad
         </button>
       </div>
-      <div class="cheatsheet-section">
-        <button class="btn btn-ghost" onclick="toggleCheatsheet()">
+
+      <!-- Exportar guion -->
+      <div class="export-bar">
+        <button class="btn btn-ghost btn-sm" onclick="exportGuion()">
+          💾 Exportar guion .txt
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleCheatsheet()">
           📋 Ver guion completo
         </button>
+      </div>
+
+      <!-- Cheatsheet desplegable -->
+      <div class="cheatsheet-section" style="width:100%;max-width:560px">
         <div class="cheatsheet" id="cheatsheet" style="display:none"></div>
+      </div>
+
+      <!-- Objeciones rápidas -->
+      <div class="objections-panel">
+        <h4>🛡️ Objeciones rápidas</h4>
+        <div class="objection-row">
+          <span class="obj-q">"No tengo tiempo"</span>
+          <span class="obj-a">→ "Justo de eso se trata. BlueIA le devuelve tiempo. ¿5 minutos más?"</span>
+        </div>
+        <div class="objection-row">
+          <span class="obj-q">"Debe ser caro"</span>
+          <span class="obj-a">→ "El primer mes es diagnóstico. El costo es de una app de celular."</span>
+        </div>
+        <div class="objection-row">
+          <span class="obj-q">"No entiendo de IA"</span>
+          <span class="obj-a">→ "No necesita entenderla. Igual que no entiende cómo funciona su freezer."</span>
+        </div>
+        <div class="objection-row">
+          <span class="obj-q">"Mandáme algo escrito"</span>
+          <span class="obj-a">→ "Perfecto. ¿Cuál es su WhatsApp? Le mando el resumen antes del viernes."</span>
+        </div>
       </div>
     </div>
   </section>
@@ -246,7 +319,7 @@
 <div class="floating-cheatsheet" id="floatingCheatsheet" style="display:none">
   <div class="fc-header">
     <strong>Guion rápido</strong>
-    <button onclick="toggleFloatingCheatsheet()">✕</button>
+    <button onclick="toggleFloatingCheatsheet()">&#10005;</button>
   </div>
   <div class="fc-content" id="fcContent"></div>
 </div>
