@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pitch Trainer — BlueIA para Mauricio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="app-header">
+  <div class="header-inner">
+    <div class="logo">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-label="BlueIA">
+        <circle cx="16" cy="16" r="14" stroke="var(--color-primary)" stroke-width="2"/>
+        <path d="M10 16 Q13 10 16 16 Q19 22 22 16" stroke="var(--color-primary)" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+        <circle cx="10" cy="16" r="2" fill="var(--color-primary)"/>
+        <circle cx="22" cy="16" r="2" fill="var(--color-primary)"/>
+      </svg>
+      <span class="logo-text">BlueIA <span class="logo-sub">Pitch Trainer</span></span>
+    </div>
+    <div class="header-actions">
+      <div class="score-badge" id="scoreBadge">Score: 0</div>
+      <button class="btn-icon" id="themeToggle" data-theme-toggle aria-label="Cambiar tema">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- SCREENS -->
+<main id="appMain">
+
+  <!-- SCREEN: BIENVENIDA -->
+  <section class="screen active" id="screenWelcome">
+    <div class="screen-content centered">
+      <div class="welcome-icon">
+        <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+          <circle cx="32" cy="32" r="30" stroke="var(--color-primary)" stroke-width="2" opacity="0.3"/>
+          <circle cx="32" cy="32" r="20" stroke="var(--color-primary)" stroke-width="2" opacity="0.6"/>
+          <circle cx="32" cy="32" r="8" fill="var(--color-primary)"/>
+        </svg>
+      </div>
+      <h1>Entrenador de Pitch</h1>
+      <p class="welcome-sub">Preparate para tu visita a <strong>Mauricio</strong><br>Supermercado El Imperio · Salinas</p>
+      <div class="welcome-tags">
+        <span class="tag">NAME</span>
+        <span class="tag-arrow">→</span>
+        <span class="tag">SAME</span>
+        <span class="tag-arrow">→</span>
+        <span class="tag">FRAME</span>
+        <span class="tag-arrow">→</span>
+        <span class="tag">AIM</span>
+        <span class="tag-arrow">→</span>
+        <span class="tag">GAME</span>
+      </div>
+      <p class="welcome-desc">Practicá el pitch completo con voz. Mauricio responde como el dueño real. Recibís feedback inmediato basado en Priestley y Meléndez.</p>
+      <div class="difficulty-section">
+        <p class="difficulty-label">Elegí la personalidad de Mauricio:</p>
+        <div class="difficulty-grid">
+          <button class="diff-btn active" data-difficulty="curioso" onclick="selectDifficulty(this)">
+            <span class="diff-emoji">🤔</span>
+            <span class="diff-name">Curioso</span>
+            <span class="diff-desc">Hace preguntas, escucha</span>
+          </button>
+          <button class="diff-btn" data-difficulty="ocupado" onclick="selectDifficulty(this)">
+            <span class="diff-emoji">⏱️</span>
+            <span class="diff-name">Ocupado</span>
+            <span class="diff-desc">Poco tiempo, interrumpe</span>
+          </button>
+          <button class="diff-btn" data-difficulty="esceptico" onclick="selectDifficulty(this)">
+            <span class="diff-emoji">🧱</span>
+            <span class="diff-name">Escéptico</span>
+            <span class="diff-desc">Desconfía de la tecnología</span>
+          </button>
+          <button class="diff-btn" data-difficulty="economico" onclick="selectDifficulty(this)">
+            <span class="diff-emoji">💰</span>
+            <span class="diff-name">Economista</span>
+            <span class="diff-desc">Todo le parece caro</span>
+          </button>
+          <button class="diff-btn" data-difficulty="abierto" onclick="selectDifficulty(this)">
+            <span class="diff-emoji">✅</span>
+            <span class="diff-name">Abierto</span>
+            <span class="diff-desc">Receptivo, ideal para empezar</span>
+          </button>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-lg" onclick="startTraining()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        Comenzar entrenamiento
+      </button>
+    </div>
+  </section>
+
+  <!-- SCREEN: TRAINING -->
+  <section class="screen" id="screenTraining">
+    <div class="training-layout">
+
+      <!-- Sidebar de progreso -->
+      <aside class="progress-sidebar">
+        <div class="progress-header">Tu progreso</div>
+        <div class="phase-list" id="phaseList">
+          <div class="phase-item" data-phase="name" id="phaseNAME">
+            <span class="phase-dot"></span>
+            <span class="phase-label">NAME</span>
+            <span class="phase-status" id="statusNAME"></span>
+          </div>
+          <div class="phase-item" data-phase="same" id="phaseSAME">
+            <span class="phase-dot"></span>
+            <span class="phase-label">SAME</span>
+            <span class="phase-status" id="statusSAME"></span>
+          </div>
+          <div class="phase-item" data-phase="frame" id="phaseFRAME">
+            <span class="phase-dot"></span>
+            <span class="phase-label">FRAME</span>
+            <span class="phase-status" id="statusFRAME"></span>
+          </div>
+          <div class="phase-item" data-phase="aim" id="phaseAIM">
+            <span class="phase-dot"></span>
+            <span class="phase-label">AIM</span>
+            <span class="phase-status" id="statusAIM"></span>
+          </div>
+          <div class="phase-item" data-phase="game" id="phaseGAME">
+            <span class="phase-dot"></span>
+            <span class="phase-label">GAME</span>
+            <span class="phase-status" id="statusGAME"></span>
+          </div>
+        </div>
+        <div class="sidebar-score">
+          <div class="score-label">Decisiones correctas</div>
+          <div class="score-number" id="sidebarScore">0</div>
+        </div>
+        <div class="sidebar-streak">
+          <div class="streak-label">Racha actual</div>
+          <div class="streak-number" id="sidebarStreak">🔥 0</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="showScreen('screenWelcome')" style="margin-top:auto">
+          ← Volver al inicio
+        </button>
+      </aside>
+
+      <!-- Panel principal -->
+      <div class="training-main">
+
+        <!-- Fase actual -->
+        <div class="phase-badge" id="currentPhaseBadge">NAME</div>
+
+        <!-- Burbuja de Mauricio -->
+        <div class="mauricio-area">
+          <div class="mauricio-avatar">
+            <span>M</span>
+            <div class="speaking-ring" id="speakingRing"></div>
+          </div>
+          <div class="mauricio-bubble" id="mauricioBubble">
+            <div class="bubble-name">Mauricio · Imperio del Este</div>
+            <p id="mauricioText">Preparando la escena...</p>
+            <div class="tts-controls">
+              <button class="btn-tts" id="btnRepeat" onclick="repeatMauricio()" title="Repetir">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.87"/></svg>
+              </button>
+              <span class="speaking-label" id="speakingLabel">🔊 Escuchando...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cita de contexto -->
+        <div class="context-tip" id="contextTip" style="display:none">
+          <span class="tip-icon">💡</span>
+          <span id="contextTipText"></span>
+        </div>
+
+        <!-- Feedback -->
+        <div class="feedback-area" id="feedbackArea" style="display:none">
+          <div class="feedback-content" id="feedbackContent"></div>
+        </div>
+
+        <!-- Opciones de respuesta -->
+        <div class="response-area" id="responseArea">
+          <div class="response-header">
+            <span class="response-label" id="responseLabel">¿Qué decís vos?</span>
+            <button class="btn-voice" id="btnVoice" onclick="toggleVoice()" title="Hablar">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+              <span id="voiceLabel">Hablar</span>
+            </button>
+          </div>
+          <div class="options-grid" id="optionsGrid"></div>
+          <div class="voice-transcript" id="voiceTranscript" style="display:none">
+            <span class="transcript-icon">🎤</span>
+            <span id="transcriptText">Escuchando tu voz...</span>
+          </div>
+        </div>
+
+        <!-- Chat de voz continuo -->
+        <div class="voice-chat-bar" id="voiceChatBar">
+          <button class="btn-voice-chat" id="btnVoiceChat" onclick="toggleVoiceChat()">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </button>
+          <span class="voice-chat-label" id="voiceChatLabel">Modo voz libre</span>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- SCREEN: RESULTADOS -->
+  <section class="screen" id="screenResults">
+    <div class="screen-content centered">
+      <div class="results-header">
+        <div class="results-icon" id="resultsIcon">🏆</div>
+        <h2 id="resultsTitle">¡Sesión completada!</h2>
+        <p id="resultsSubtitle">Así te fue en esta sesión:</p>
+      </div>
+      <div class="results-grid" id="resultsGrid"></div>
+      <div class="results-summary" id="resultsSummary"></div>
+      <div class="results-recommendation" id="resultsRecommendation"></div>
+      <div class="results-actions">
+        <button class="btn btn-primary" onclick="restartSameConfig()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.87"/></svg>
+          Repetir con mismo Mauricio
+        </button>
+        <button class="btn btn-secondary" onclick="showScreen('screenWelcome')">
+          Cambiar dificultad
+        </button>
+      </div>
+      <div class="cheatsheet-section">
+        <button class="btn btn-ghost" onclick="toggleCheatsheet()">
+          📋 Ver guion completo
+        </button>
+        <div class="cheatsheet" id="cheatsheet" style="display:none"></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- FLOATING: Cheatsheet rápido -->
+<div class="fab-area">
+  <button class="fab" id="fabCheatsheet" onclick="toggleFloatingCheatsheet()" title="Guion rápido">
+    📋
+  </button>
+</div>
+<div class="floating-cheatsheet" id="floatingCheatsheet" style="display:none">
+  <div class="fc-header">
+    <strong>Guion rápido</strong>
+    <button onclick="toggleFloatingCheatsheet()">✕</button>
+  </div>
+  <div class="fc-content" id="fcContent"></div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
