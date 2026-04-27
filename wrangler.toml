@@ -1,0 +1,6 @@
+name = "pitch-trainer-mauricio"
+main = "_worker.js"
+compatibility_date = "2026-04-27"
+
+[assets]
+directory = "."
