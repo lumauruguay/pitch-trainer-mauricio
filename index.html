@@ -18,20 +18,8 @@
       border-radius: 999px;
       letter-spacing: 0.03em;
     }
-    .result-trend {
-      font-size: 0.65rem;
-      color: var(--color-text-faint);
-      margin-top: 2px;
-    }
-    .export-bar {
-      display: flex;
-      gap: 0.5rem;
-      flex-wrap: wrap;
-      justify-content: center;
-      width: 100%;
-      max-width: 560px;
-      margin-top: -0.5rem;
-    }
+    .result-trend { font-size:.65rem; color:var(--color-text-faint); margin-top:2px; }
+    .export-bar { display:flex; gap:.5rem; flex-wrap:wrap; justify-content:center; width:100%; max-width:560px; margin-top:-.5rem; }
     .objections-panel {
       background: var(--color-surface);
       border: 1px solid var(--color-border);
@@ -43,89 +31,48 @@
       font-size: var(--text-sm);
       line-height: 1.8;
     }
-    .objections-panel h4 {
-      font-size: var(--text-sm);
-      font-weight: 700;
-      color: var(--color-primary);
-      margin-bottom: var(--space-3);
-    }
-    .objection-row {
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 0.3rem 0.75rem;
-      align-items: baseline;
-      margin-bottom: var(--space-2);
-    }
-    .obj-q { color: var(--color-warning); font-weight: 600; }
-    .obj-a { color: var(--color-text-muted); }
+    .objections-panel h4 { font-size:var(--text-sm); font-weight:700; color:var(--color-primary); margin-bottom:var(--space-3); }
+    .objection-row { display:grid; grid-template-columns:auto 1fr; gap:.3rem .75rem; align-items:baseline; margin-bottom:var(--space-2); }
+    .obj-q { color:var(--color-warning); font-weight:600; }
+    .obj-a { color:var(--color-text-muted); }
+
+    /* ── Panel de voz ── */
     .voice-config-panel {
-      width: 100%;
-      max-width: 480px;
-      background: var(--color-surface);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-lg);
-      padding: var(--space-4) var(--space-5);
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-3);
+      width:100%; max-width:480px;
+      background:var(--color-surface);
+      border:1px solid var(--color-border);
+      border-radius:var(--radius-lg);
+      padding:var(--space-4) var(--space-5);
+      display:flex; flex-direction:column; gap:var(--space-3);
     }
     .voice-config-panel label {
-      font-size: var(--text-sm);
-      color: var(--color-text-muted);
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      flex-wrap: wrap;
+      font-size:var(--text-sm); color:var(--color-text-muted);
+      font-weight:600; display:flex; align-items:center; gap:.4rem; flex-wrap:wrap;
     }
-    .badge-enhanced {
-      font-size: 0.65rem;
-      background: var(--color-primary);
-      color: white;
-      padding: 1px 6px;
-      border-radius: 999px;
-      font-weight: 700;
-      letter-spacing: 0.05em;
+    #ttsEngineBadge {
+      font-size:.65rem; padding:2px 8px; border-radius:999px;
+      font-weight:700; display:inline-block;
+      background:#22c55e22; color:#22c55e; border:1px solid #22c55e55;
     }
     #voicePicker {
-      width: 100%;
-      padding: var(--space-2) var(--space-3);
-      border-radius: var(--radius-md);
-      border: 1px solid var(--color-border);
-      background: var(--color-surface-2);
-      color: var(--color-text);
-      font-size: var(--text-sm);
-      font-family: var(--font-body, sans-serif);
-      cursor: pointer;
+      width:100%; padding:var(--space-2) var(--space-3);
+      border-radius:var(--radius-md); border:1px solid var(--color-border);
+      background:var(--color-surface-2); color:var(--color-text);
+      font-size:var(--text-sm); font-family:var(--font-body,sans-serif); cursor:pointer;
     }
-    .voice-hint {
-      font-size: 0.7rem;
-      color: var(--color-text-faint);
-      line-height: 1.5;
-    }
-    .tts-engine-badge {
-      font-size: 0.65rem;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-weight: 700;
-      display: inline-block;
-      margin-bottom: 2px;
-    }
-    .tts-engine-badge.kokoro  { background: #22c55e22; color: #22c55e; border: 1px solid #22c55e55; }
-    .tts-engine-badge.loading { background: #f59e0b22; color: #f59e0b; border: 1px solid #f59e0b55; }
-    .tts-engine-badge.system  { background: #6366f122; color: #818cf8; border: 1px solid #6366f155; }
+    .voice-hint { font-size:.7rem; color:var(--color-text-faint); line-height:1.5; }
     .btn-preview-voice {
-      font-size: var(--text-xs);
-      padding: var(--space-1) var(--space-3);
-      border-radius: var(--radius-full);
-      border: 1px solid var(--color-primary);
-      color: var(--color-primary);
-      background: transparent;
-      cursor: pointer;
-      transition: all 180ms ease;
-      align-self: flex-start;
+      font-size:var(--text-xs); padding:var(--space-1) var(--space-3);
+      border-radius:var(--radius-full); border:1px solid var(--color-primary);
+      color:var(--color-primary); background:transparent; cursor:pointer;
+      transition:all 180ms ease; align-self:flex-start;
     }
-    .btn-preview-voice:hover { background: var(--color-primary); color: white; }
+    .btn-preview-voice:hover { background:var(--color-primary); color:white; }
+    #noVoiceWarning {
+      font-size:.7rem; color:var(--color-warning);
+      background:#f59e0b15; border:1px solid #f59e0b44;
+      border-radius:var(--radius-md); padding:6px 10px; display:none;
+    }
   </style>
 </head>
 <body>
@@ -174,25 +121,18 @@
       </div>
       <p class="welcome-desc">Practicá el pitch completo con voz. Mauricio responde como el dueño real. Feedback inmediato basado en Priestley y Meléndez.</p>
 
-      <!-- PANEL DE VOZ -->
+      <!-- PANEL DE VOZ — limpio, sin referencias a Kokoro/Piper -->
       <div class="voice-config-panel">
         <label for="voicePicker">
           🔊 Voz de Mauricio
-          <span class="badge-enhanced" id="ttsEngineBadge">⏳ Cargando Kokoro...</span>
+          <span id="ttsEngineBadge">Detectando...</span>
         </label>
-        <div id="ttsEngineStatus" style="font-size:0.7rem;color:var(--color-text-faint);line-height:1.5">Iniciando motor de voz premium...</div>
-        <select id="voicePicker" style="display:none">
-          <option value="kokoro_hm_omega">⭐ Kokoro · hm_omega (masculino, premium)</option>
-          <option value="kokoro_hm_psi">⭐ Kokoro · hm_psi (masculino, grave)</option>
-          <option value="kokoro_hf_alpha">Kokoro · hf_alpha (femenino)</option>
-          <option value="system">🔄 Voz del sistema (fallback)</option>
+        <select id="voicePicker">
+          <option value="">Cargando voces del sistema...</option>
         </select>
         <button class="btn-preview-voice" onclick="previewVoice()">▶ Probar voz</button>
-        <p class="voice-hint" id="voiceHint">
-          <strong>Kokoro TTS</strong> corre en tu browser sin API key — calidad ElevenLabs, gratis.<br>
-          Primera carga: ~90MB (se cachea, luego funciona offline).
-          Funciona en <strong>Chrome Android</strong> y macOS.
-        </p>
+        <p class="voice-hint" id="voiceHint">Las voces disponibles dependen de tu sistema operativo.<br>Elegí la que suene más masculina y natural en español.</p>
+        <div id="noVoiceWarning">⚠️ No se detectaron voces en español. La voz puede sonar en inglés. En iOS: Ajustes → Accesibilidad → Contenido oral → Voces → Español.</div>
       </div>
 
       <div class="difficulty-section">
@@ -228,11 +168,11 @@
       <aside class="progress-sidebar">
         <div class="progress-header">Tu progreso</div>
         <div class="phase-list" id="phaseList">
-          <div class="phase-item" data-phase="name" id="phaseNAME"><span class="phase-dot"></span><span class="phase-label">NAME</span><span class="phase-status" id="statusNAME"></span></div>
-          <div class="phase-item" data-phase="same" id="phaseSAME"><span class="phase-dot"></span><span class="phase-label">SAME</span><span class="phase-status" id="statusSAME"></span></div>
-          <div class="phase-item" data-phase="frame" id="phaseFRAME"><span class="phase-dot"></span><span class="phase-label">FRAME</span><span class="phase-status" id="statusFRAME"></span></div>
-          <div class="phase-item" data-phase="aim" id="phaseAIM"><span class="phase-dot"></span><span class="phase-label">AIM</span><span class="phase-status" id="statusAIM"></span></div>
-          <div class="phase-item" data-phase="game" id="phaseGAME"><span class="phase-dot"></span><span class="phase-label">GAME</span><span class="phase-status" id="statusGAME"></span></div>
+          <div class="phase-item" id="phaseNAME"><span class="phase-dot"></span><span class="phase-label">NAME</span><span class="phase-status" id="statusNAME"></span></div>
+          <div class="phase-item" id="phaseSAME"><span class="phase-dot"></span><span class="phase-label">SAME</span><span class="phase-status" id="statusSAME"></span></div>
+          <div class="phase-item" id="phaseFRAME"><span class="phase-dot"></span><span class="phase-label">FRAME</span><span class="phase-status" id="statusFRAME"></span></div>
+          <div class="phase-item" id="phaseAIM"><span class="phase-dot"></span><span class="phase-label">AIM</span><span class="phase-status" id="statusAIM"></span></div>
+          <div class="phase-item" id="phaseGAME"><span class="phase-dot"></span><span class="phase-label">GAME</span><span class="phase-status" id="statusGAME"></span></div>
         </div>
         <div class="sidebar-score"><div class="score-label">Decisiones correctas</div><div class="score-number" id="sidebarScore">0</div></div>
         <div class="sidebar-streak"><div class="streak-label">Racha actual</div><div class="streak-number" id="sidebarStreak">🔥 0</div></div>
@@ -253,7 +193,7 @@
               <button class="btn-tts" id="btnRepeat" onclick="repeatMauricio()" title="Repetir">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.87"/></svg>
               </button>
-              <span class="speaking-label" id="speakingLabel">🔊 Escuchando...</span>
+              <span class="speaking-label" id="speakingLabel">🔊 Listo</span>
             </div>
           </div>
         </div>
@@ -309,7 +249,7 @@
         <button class="btn btn-ghost btn-sm" onclick="exportGuion()">💾 Exportar guion .txt</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleCheatsheet()">📋 Ver guion completo</button>
       </div>
-      <div class="cheatsheet-section" style="width:100%;max-width:560px">
+      <div style="width:100%;max-width:560px">
         <div class="cheatsheet" id="cheatsheet" style="display:none"></div>
       </div>
       <div class="objections-panel">
