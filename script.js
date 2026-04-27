@@ -1,11 +1,11 @@
-// BlueIA Pitch Trainer — v4.2
-// Fix: Siri (Voz 1) prioridad máxima absoluta en Safari macOS
+// BlueIA Pitch Trainer — v4.3
+// Kokoro eliminado. Web Speech API pura con Eddy (es-MX) optimizado.
+// Siri no es accesible desde pages web en Safari (restricción Apple).
 
 // ─── ESTADO GLOBAL ───────────────────────────────────────────────────────────
 const state = {
   difficulty: 'curioso',
   currentPhase: 'name',
-  phaseIndex: 0,
   scores: { name: 0, same: 0, frame: 0, aim: 0, game: 0 },
   attempts: { name: 0, same: 0, frame: 0, aim: 0, game: 0 },
   totalScore: 0,
@@ -20,13 +20,7 @@ const state = {
   sessionCount: 0,
   phaseHistory: { name: [], same: [], frame: [], aim: [], game: [] },
   unlockedDifficult: false,
-  kokoroReady: false,
-  kokoroPipeline: null,
-  kokoroLoading: false,
-  selectedKokoroVoice: 'hm_omega',
-  useKokoro: false,
-  selectedSystemVoiceName: null,
-  voiceScanInterval: null   // para el re-scan que busca Siri
+  selectedVoiceName: null
 };
 const phases = ['name', 'same', 'frame', 'aim', 'game'];
 
@@ -42,27 +36,9 @@ const arbol = {
     ],
     hint: "Usá tu NAME: quién sos + qué resultado concreto generás. No des tu título.",
     options: [
-      {
-        text: "Soy Adrián Mariotti, fundador de BlueIA. Soy el ingeniero de IA que convierte el caos de un comercio en un sistema que trabaja solo.",
-        quality: 'perfect',
-        feedback: "PERFECTO ✅ — Identidad + resultado + lenguaje de dueño. Mauricio entendió en 10 segundos.",
-        quote: "'Una KPI enciende una luz cuando le preguntan qué hace' — Priestley",
-        nextMauricio: "Ah, interesante. ¿Y qué significa eso para un supermercado?"
-      },
-      {
-        text: "Soy consultor de tecnología e inteligencia artificial para empresas.",
-        quality: 'ok',
-        feedback: "REGULAR ⚠️ — Demasiado genérico. 'Consultor de tecnología' no le dice nada. Hablá del resultado.",
-        quote: "Meléndez: 'Un preguntador es un gran argumentador. Pero primero tenés que conectar con su mundo.'",
-        nextMauricio: "Mmm, hay muchos consultores de tecnología. ¿Qué me diferencia esto de lo que ya tengo?"
-      },
-      {
-        text: "Vengo a contarle sobre BlueIA, una plataforma de IA para PyMEs uruguayas.",
-        quality: 'bad',
-        feedback: "INCORRECTO ❌ — Empezaste por la herramienta, no por el resultado. Mauricio ya apagó el interés.",
-        quote: "Priestley: 'No describas lo que hacés — describí el mundo que creás para tu cliente.'",
-        nextMauricio: "Ah, otra herramienta más... No tengo tiempo ahora."
-      }
+      { text: "Soy Adrián Mariotti, fundador de BlueIA. Soy el ingeniero de IA que convierte el caos de un comercio en un sistema que trabaja solo.", quality: 'perfect', feedback: "PERFECTO ✅ — Identidad + resultado + lenguaje de dueño.", quote: "'Una KPI enciende una luz cuando le preguntan qué hace' — Priestley", nextMauricio: "Ah, interesante. ¿Y qué significa eso para un supermercado?" },
+      { text: "Soy consultor de tecnología e inteligencia artificial para empresas.", quality: 'ok', feedback: "REGULAR ⚠️ — Demasiado genérico. 'Consultor de tecnología' no le dice nada.", quote: "Meléndez: 'Primero tenés que conectar con su mundo.'", nextMauricio: "Mmm, hay muchos consultores. ¿Qué me diferencia esto?" },
+      { text: "Vengo a contarle sobre BlueIA, una plataforma de IA para PyMEs uruguayas.", quality: 'bad', feedback: "INCORRECTO ❌ — Empezaste por la herramienta, no por el resultado.", quote: "Priestley: 'Describí el mundo que creás para tu cliente.'", nextMauricio: "Ah, otra herramienta más... No tengo tiempo ahora." }
     ]
   },
   same: {
@@ -75,27 +51,9 @@ const arbol = {
     ],
     hint: "Nombrá el dolor que YA SIENTE. Si asiente, encontraste el SAME.",
     options: [
-      {
-        text: "Mauricio, estuve mirando cómo funciona Imperio. Tienen una comunidad enorme en Facebook, miles de seguidores, sorteos, videos. Pero toda esa fuerza hoy no le dice nada: qué promo dejó más margen, qué clientes volvieron, dónde se fue la plata. Cada día empieza de cero.",
-        quality: 'perfect',
-        feedback: "PERFECTO ✅ — Demostraste que hiciste la tarea. Nombraste SU negocio, SU fuerza y SU punto ciego.",
-        quote: "Priestley: 'Si asienten mientras hablás, encontraste el SAME.'",
-        nextMauricio: "Es verdad eso... a veces hacemos una promo y no sabemos bien si funcionó o no."
-      },
-      {
-        text: "La mayoría de los supermercados depende de una sola persona para todo. Si no estás vos, se cae.",
-        quality: 'ok',
-        feedback: "BIEN ⚠️ — Buen dolor, pero genérico. No habló de Imperio específicamente. Personalizá más.",
-        quote: "'Usá sus propias palabras, no las tuyas.' — Guion BlueIA",
-        nextMauricio: "Sí, algo así pasa acá también. ¿Qué propone usted?"
-      },
-      {
-        text: "Con BlueIA puede automatizar sus procesos y tener dashboards en tiempo real.",
-        quality: 'bad',
-        feedback: "INCORRECTO ❌ — Saltaste directo a la solución sin validar el dolor. Mauricio no conectó aún.",
-        quote: "Meléndez: 'Nunca ofrezcas la solución antes de que el cliente confirme su problema.'",
-        nextMauricio: "¿Dashboards? No sé si necesito eso ahora mismo..."
-      }
+      { text: "Mauricio, estuve mirando cómo funciona Imperio. Tienen una comunidad enorme en Facebook, miles de seguidores, sorteos, videos. Pero toda esa fuerza hoy no le dice nada: qué promo dejó más margen, qué clientes volvieron, dónde se fue la plata. Cada día empieza de cero.", quality: 'perfect', feedback: "PERFECTO ✅ — Nombraste SU negocio, SU fuerza y SU punto ciego.", quote: "Priestley: 'Si asienten mientras hablás, encontraste el SAME.'", nextMauricio: "Es verdad eso... a veces hacemos una promo y no sabemos si funcionó." },
+      { text: "La mayoría de los supermercados depende de una sola persona para todo. Si no estás vos, se cae.", quality: 'ok', feedback: "BIEN ⚠️ — Buen dolor pero genérico. Personalizá más.", quote: "'Usá sus propias palabras, no las tuyas.' — Guion BlueIA", nextMauricio: "Sí, algo así pasa acá también. ¿Qué propone usted?" },
+      { text: "Con BlueIA puede automatizar sus procesos y tener dashboards en tiempo real.", quality: 'bad', feedback: "INCORRECTO ❌ — Saltaste a la solución sin validar el dolor.", quote: "Meléndez: 'Nunca ofrezcas la solución antes de que el cliente confirme su problema.'", nextMauricio: "¿Dashboards? No sé si necesito eso ahora mismo..." }
     ]
   },
   frame: {
@@ -108,27 +66,9 @@ const arbol = {
     ],
     hint: "Explicá POR QUÉ el problema existe. Tu diagnóstico único. No la solución todavía.",
     options: [
-      {
-        text: "El problema no es que trabajás poco, Mauricio. Es que Imperio no tiene memoria. Lo que pasa en caja, en stock, en redes y en WhatsApp se pierde. Sin esa memoria, no hay inteligencia. Y sin inteligencia, el crecimiento tiene un techo invisible.",
-        quality: 'perfect',
-        feedback: "PERFECTO ✅ — Diagnóstico poderoso. 'Imperio no tiene memoria' es una frase que no va a olvidar.",
-        quote: "Priestley: 'Tu FRAME es tu foso competitivo. Ningún otro proveedor dice esto.'",
-        nextMauricio: "Mirá... nunca lo había pensado así. ¿Y cómo se le da esa memoria?"
-      },
-      {
-        text: "El problema es que no tienen un sistema integrado para gestionar todo.",
-        quality: 'ok',
-        feedback: "REGULAR ⚠️ — Correcto pero técnico. 'Sistema integrado' no conecta emocionalmente.",
-        quote: "BlueIA FRAME: 'El negocio no tiene memoria. Cada día empieza de cero.'",
-        nextMauricio: "Bueno... ¿y eso qué costaría?"
-      },
-      {
-        text: "La solución es un dashboard con sus métricas clave y automatizaciones de WhatsApp.",
-        quality: 'bad',
-        feedback: "INCORRECTO ❌ — Saltaste al AIM antes del FRAME. Mauricio no entiende por qué lo necesita.",
-        quote: "Sin FRAME, el AIM suena a venta de software. Con FRAME, suena a diagnóstico de médico.",
-        nextMauricio: "¿Cuánto sale?"
-      }
+      { text: "El problema no es que trabajás poco, Mauricio. Es que Imperio no tiene memoria. Lo que pasa en caja, en stock, en redes y en WhatsApp se pierde. Sin esa memoria, no hay inteligencia. Y sin inteligencia, el crecimiento tiene un techo invisible.", quality: 'perfect', feedback: "PERFECTO ✅ — 'Imperio no tiene memoria' es una frase que no va a olvidar.", quote: "Priestley: 'Tu FRAME es tu foso competitivo.'", nextMauricio: "Mirá... nunca lo había pensado así. ¿Y cómo se le da esa memoria?" },
+      { text: "El problema es que no tienen un sistema integrado para gestionar todo.", quality: 'ok', feedback: "REGULAR ⚠️ — Correcto pero técnico. No conecta emocionalmente.", quote: "BlueIA FRAME: 'El negocio no tiene memoria. Cada día empieza de cero.'", nextMauricio: "Bueno... ¿y eso qué costaría?" },
+      { text: "La solución es un dashboard con sus métricas clave y automatizaciones de WhatsApp.", quality: 'bad', feedback: "INCORRECTO ❌ — Saltaste al AIM antes del FRAME.", quote: "Sin FRAME, el AIM suena a venta de software. Con FRAME, suena a diagnóstico de médico.", nextMauricio: "¿Cuánto sale?" }
     ]
   },
   aim: {
@@ -141,27 +81,9 @@ const arbol = {
     ],
     hint: "Nombrá la transformación concreta: tiempo, plata, tranquilidad. Sé específico.",
     options: [
-      {
-        text: "En el primer mes, mi objetivo es devolverle horas reales de su semana. Las consultas repetitivas de WhatsApp se responden solas. Tiene un tablero simple con sus números clave. Y recibe alertas cuando algo importante se desvía. No tiene que estar en todo.",
-        quality: 'perfect',
-        feedback: "PERFECTO ✅ — Tres transformaciones concretas: tiempo, claridad, autonomía. Exactamente lo que quiere escuchar.",
-        quote: "Priestley: 'Ligá tu producto a más dinero, más tiempo o mejor calidad de vida. Sé específico.'",
-        nextMauricio: "Hmm... eso de las consultas solas me interesa. Nos matan por WhatsApp."
-      },
-      {
-        text: "BlueIA le da inteligencia de negocios avanzada con análisis predictivo y machine learning.",
-        quality: 'bad',
-        feedback: "INCORRECTO ❌ — Demasiado técnico. 'Machine learning' no le dice nada a Mauricio.",
-        quote: "'Hablá del resultado, no de la tecnología.' — Principio fundacional BlueIA",
-        nextMauricio: "No entiendo bien eso... ¿y cuánto sale?"
-      },
-      {
-        text: "El resultado es menos tiempo en tareas repetitivas y más claridad para tomar decisiones.",
-        quality: 'ok',
-        feedback: "BIEN ⚠️ — Correcto pero vago. Faltó especificidad: ¿cuánto tiempo? ¿cuáles decisiones?",
-        quote: "'Sin AIM concreto, el pitch muere en el FRAME.' — Guion BlueIA",
-        nextMauricio: "Ok, suena bien. ¿Y qué significa eso en mi día a día?"
-      }
+      { text: "En el primer mes, mi objetivo es devolverle horas reales de su semana. Las consultas repetitivas de WhatsApp se responden solas. Tiene un tablero simple con sus números clave. Y recibe alertas cuando algo importante se desvía. No tiene que estar en todo.", quality: 'perfect', feedback: "PERFECTO ✅ — Tres transformaciones concretas: tiempo, claridad, autonomía.", quote: "Priestley: 'Ligá tu producto a más dinero, más tiempo o mejor calidad de vida.'", nextMauricio: "Hmm... eso de las consultas solas me interesa. Nos matan por WhatsApp." },
+      { text: "BlueIA le da inteligencia de negocios avanzada con análisis predictivo y machine learning.", quality: 'bad', feedback: "INCORRECTO ❌ — 'Machine learning' no le dice nada a Mauricio.", quote: "'Hablá del resultado, no de la tecnología.' — BlueIA", nextMauricio: "No entiendo bien eso... ¿y cuánto sale?" },
+      { text: "El resultado es menos tiempo en tareas repetitivas y más claridad para tomar decisiones.", quality: 'ok', feedback: "BIEN ⚠️ — Correcto pero vago. Faltó especificidad.", quote: "'Sin AIM concreto, el pitch muere en el FRAME.' — Guion BlueIA", nextMauricio: "Ok, suena bien. ¿Y qué significa eso en mi día a día?" }
     ]
   },
   game: {
@@ -174,27 +96,9 @@ const arbol = {
     ],
     hint: "Convertí la venta en una causa. Él no compra tecnología — es el primero inteligente de la zona.",
     options: [
-      {
-        text: "Mi juego es que cualquier PyME de Canelones pueda tomar decisiones con la misma claridad que una gran cadena. Imperio ya es el referente en precio y cercanía. Yo quiero que sea también el primer supermercado verdaderamente inteligente de la zona. Con datos y automatización al nivel de Tienda Inglesa, pero a un costo de PyME.",
-        quality: 'perfect',
-        feedback: "PERFECTO ✅ — Identidad poderosa: 'el primero inteligente de Canelones'. Eso no se negocia por precio.",
-        quote: "Priestley: 'El GAME convierte una venta en una causa. Identidad > precio.'",
-        nextMauricio: "Mire, me interesa. ¿Cuándo me puede mostrar algo concreto?"
-      },
-      {
-        text: "Estamos ayudando a que las PyMEs de Uruguay sean más competitivas con inteligencia artificial.",
-        quality: 'ok',
-        feedback: "REGULAR ⚠️ — Buena intención pero genérica. Faltó hacer a Imperio protagonista del GAME.",
-        quote: "'El cliente debe sentir que está siendo parte de algo más grande.' — Priestley",
-        nextMauricio: "Sí, suena bien. Mándeme información."
-      },
-      {
-        text: "Tenemos un precio especial para los primeros clientes del programa.",
-        quality: 'bad',
-        feedback: "INCORRECTO ❌ — Cerraste con descuento en lugar de con visión. Eso convierte el pitch en venta de software.",
-        quote: "'Cerrá siempre con el GAME antes de la oferta.' — Guion BlueIA",
-        nextMauricio: "¿Cuánto es ese precio especial?"
-      }
+      { text: "Mi juego es que cualquier PyME de Canelones pueda tomar decisiones con la misma claridad que una gran cadena. Imperio ya es el referente en precio y cercanía. Yo quiero que sea también el primer supermercado verdaderamente inteligente de la zona. Con datos y automatización al nivel de Tienda Inglesa, pero a un costo de PyME.", quality: 'perfect', feedback: "PERFECTO ✅ — 'El primero inteligente de Canelones'. Eso no se negocia por precio.", quote: "Priestley: 'El GAME convierte una venta en una causa. Identidad > precio.'", nextMauricio: "Mire, me interesa. ¿Cuándo me puede mostrar algo concreto?" },
+      { text: "Estamos ayudando a que las PyMEs de Uruguay sean más competitivas con inteligencia artificial.", quality: 'ok', feedback: "REGULAR ⚠️ — Faltó hacer a Imperio protagonista del GAME.", quote: "'El cliente debe sentir que está siendo parte de algo más grande.' — Priestley", nextMauricio: "Sí, suena bien. Mándeme información." },
+      { text: "Tenemos un precio especial para los primeros clientes del programa.", quality: 'bad', feedback: "INCORRECTO ❌ — Cerraste con descuento en lugar de con visión.", quote: "'Cerrá siempre con el GAME antes de la oferta.' — Guion BlueIA", nextMauricio: "¿Cuánto es ese precio especial?" }
     ]
   }
 };
@@ -209,110 +113,77 @@ const personalities = {
   dificil:   { name: '😤 Difícil', responseStyle: (arr) => arr.find(m => m.type === 'esceptico') || arr[arr.length - 1] }
 };
 
-// ─── KOKORO TTS ENGINE ────────────────────────────────────────────────────────
-const KOKORO_VOICE_MAP = { 'hm_omega': 'hm_omega', 'hm_psi': 'hm_psi', 'hf_alpha': 'hf_alpha' };
-
-function _setTTSBadge(mode, voiceName) {
-  const badge  = document.getElementById('ttsEngineBadge');
-  const status = document.getElementById('ttsEngineStatus');
-  const picker = document.getElementById('voicePicker');
-  if (!badge) return;
-  if (mode === 'kokoro') {
-    badge.className = 'badge-enhanced';
-    badge.textContent = '⭐ Kokoro TTS — voz premium';
-    if (status) status.textContent = '✅ Kokoro listo';
-    if (picker) picker.style.display = 'block';
-  } else if (mode === 'loading') {
-    badge.className = 'badge-enhanced';
-    badge.textContent = '⏳ Cargando Kokoro...';
-    if (status) status.textContent = 'Descargando modelo. Solo ocurre la primera vez.';
-  } else {
-    badge.className = 'badge-enhanced';
-    badge.style.background = '#6366f122';
-    badge.style.color = '#818cf8';
-    const isSiri = voiceName && voiceName.toLowerCase().includes('siri');
-    badge.textContent = isSiri ? `⭐ Siri activa · ${voiceName}` : voiceName ? `🔄 Sistema · ${voiceName}` : '🔄 Voz del sistema';
-    if (status) status.textContent = voiceName ? `Voz activa: ${voiceName}` : 'Usando voces del dispositivo.';
-  }
-}
-
-async function initKokoro() {
-  if (state.kokoroLoading || state.kokoroReady) return;
-  state.kokoroLoading = true;
-  _setTTSBadge('loading');
-  try {
-    const { KokoroTTS } = await import('https://cdn.jsdelivr.net/npm/kokoro-js@1/dist/kokoro.js');
-    const pipeline = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', { dtype: 'q8', device: 'auto' });
-    state.kokoroPipeline = pipeline;
-    state.kokoroReady = true;
-    state.useKokoro = true;
-    state.kokoroLoading = false;
-    _setTTSBadge('kokoro');
-  } catch (err) {
-    state.kokoroLoading = false;
-    state.useKokoro = false;
-    _waitForVoicesAndPopulate();
-  }
-}
-
-async function speakWithKokoro(text, onEnd) {
-  if (!state.kokoroPipeline) { if (onEnd) onEnd(); return; }
-  try {
-    const voice  = KOKORO_VOICE_MAP[state.selectedKokoroVoice] || 'hm_omega';
-    const result = await state.kokoroPipeline(text, { voice, speed: 0.95 });
-    const ctx    = new (window.AudioContext || window.webkitAudioContext)();
-    const buf    = ctx.createBuffer(1, result.audio.length, result.sampling_rate);
-    buf.getChannelData(0).set(result.audio);
-    const src    = ctx.createBufferSource();
-    src.buffer   = buf;
-    src.connect(ctx.destination);
-    _setSpeakingUI(true);
-    src.onended = () => { _setSpeakingUI(false); ctx.close(); if (onEnd) onEnd(); };
-    src.start();
-  } catch (err) {
-    state.isSpeaking = false;
-    speakWithSystem(text, onEnd);
-  }
-}
-
-// ─── WEB SPEECH API ──────────────────────────────────────────────────────────────
-
-// PRIORIDAD DE VOCES:
-// 1. Siri (cualquier variante) → score 200  ← PRIORIDAD MÁXIMA ABSOLUTA
-// 2. Voces masculinas es-MX (Eddy, Reed, Rocko...) → score 100-90
-// 3. Voces masculinas es-ES → score 80-70
-// 4. Femeninas es-MX → score 20
-// 5. Resto → score 10
-const MALE_VOICE_NAMES = ['eddy','reed','rocko','grandpa','jorge','juan','diego','carlos','miguel','pedro'];
+// ─── TTS: WEB SPEECH API OPTIMIZADA ─────────────────────────────────────────
+// Orden de preferencia masculino: Eddy > Reed > Rocko > Grandpa > Jorge > ...
+const VOICE_PRIORITY = ['eddy','reed','rocko','grandpa','jorge','juan','diego','carlos','miguel','pedro'];
 
 function _scoreVoice(v) {
   const n = v.name.toLowerCase();
-  // Siri SIEMPRE gana, sin importar el idioma
-  if (n.includes('siri')) return 200;
-  // Masculinas es-MX
-  const maleIdx = MALE_VOICE_NAMES.findIndex(m => n.includes(m));
-  if (maleIdx !== -1 && v.lang === 'es-MX') return 100 - maleIdx;
-  if (maleIdx !== -1 && v.lang.startsWith('es')) return 80 - maleIdx;
+  const idx = VOICE_PRIORITY.findIndex(m => n.includes(m));
+  if (idx !== -1 && v.lang === 'es-MX') return 100 - idx;
+  if (idx !== -1 && v.lang.startsWith('es')) return 80 - idx;
   if (v.lang === 'es-MX') return 20;
   if (v.lang === 'es-AR') return 15;
   if (v.lang.startsWith('es')) return 10;
   return 0;
 }
 
-function _getBestVoice(voices) {
-  const esVoices = voices.filter(v => v.lang.startsWith('es'));
-  if (!esVoices.length) return voices[0] || null;
+function _getBestVoice() {
+  if (!window.speechSynthesis) return null;
+  const all = window.speechSynthesis.getVoices();
+  // Si el usuario eligió una, usarla
+  if (state.selectedVoiceName) {
+    const found = all.find(v => v.name === state.selectedVoiceName);
+    if (found) return found;
+  }
+  const esVoices = all.filter(v => v.lang.startsWith('es'));
+  if (!esVoices.length) return all[0] || null;
   return esVoices.sort((a, b) => _scoreVoice(b) - _scoreVoice(a))[0];
 }
 
-function _getActiveSystemVoice() {
-  if (!window.speechSynthesis) return null;
-  const voices = window.speechSynthesis.getVoices();
-  if (state.selectedSystemVoiceName) {
-    const found = voices.find(v => v.name === state.selectedSystemVoiceName);
-    if (found) return found;
+function _populatePicker(voices) {
+  const select = document.getElementById('voicePicker');
+  if (!select) return;
+  const esVoices = voices.filter(v => v.lang.startsWith('es'));
+  if (!esVoices.length) return;
+  const sorted = [...esVoices].sort((a, b) => _scoreVoice(b) - _scoreVoice(a));
+  select.style.display = 'block';
+  select.innerHTML = sorted.map(v => {
+    const n      = v.name.toLowerCase();
+    const isMale = VOICE_PRIORITY.some(m => n.includes(m));
+    const prefix = isMale ? '♂' : '♀';
+    return `<option value="${v.name}">${prefix} ${v.name} (${v.lang})</option>`;
+  }).join('');
+  // Preseleccionar la mejor si no hay elección manual
+  if (!state.selectedVoiceName) {
+    const best = sorted[0];
+    if (best) {
+      select.value = best.name;
+      state.selectedVoiceName = best.name;
+      _updateBadge(best.name);
+    }
+  } else {
+    select.value = state.selectedVoiceName;
   }
-  return _getBestVoice(voices);
+  select.onchange = () => {
+    state.selectedVoiceName = select.value;
+    _updateBadge(select.value);
+    speakText('Hola, soy Mauricio. Cuénteme.');
+  };
+}
+
+function _updateBadge(voiceName) {
+  const badge  = document.getElementById('ttsEngineBadge');
+  const status = document.getElementById('ttsEngineStatus');
+  if (badge)  badge.textContent  = `🔊 ${voiceName || 'Voz del sistema'}`;
+  if (status) status.textContent = `Voz activa: ${voiceName || 'automática'}. Podés cambiarla en el selector.`;
+}
+
+function _initVoices() {
+  if (!window.speechSynthesis) return;
+  const v = window.speechSynthesis.getVoices();
+  if (v.length > 0) _populatePicker(v);
+  window.speechSynthesis.onvoiceschanged = () => _populatePicker(window.speechSynthesis.getVoices());
 }
 
 let _speakDebounce = null;
@@ -322,18 +193,22 @@ function speakWithSystem(text, onEnd) {
   _speakDebounce = setTimeout(() => {
     if (window.speechSynthesis.speaking || window.speechSynthesis.pending)
       window.speechSynthesis.cancel();
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang  = 'es-MX';
-    utt.rate  = 0.92;
-    utt.pitch = 0.9;
-    const voice = _getActiveSystemVoice();
+    const utt   = new SpeechSynthesisUtterance(text);
+    const voice = _getBestVoice();
     if (voice) utt.voice = voice;
+    // Ajustar lang según la voz elegida para evitar acento extraño
+    utt.lang  = voice ? voice.lang : 'es-MX';
+    utt.rate  = 0.88;   // más lento = más natural y claro
+    utt.pitch = 0.85;   // tono más grave = suena más como adulto mayor uruguayo
+    utt.volume = 1.0;
     utt.onstart = () => _setSpeakingUI(true);
     utt.onend   = () => { _setSpeakingUI(false); if (onEnd) onEnd(); };
-    utt.onerror = () => { state.isSpeaking = false; if (onEnd) onEnd(); };
+    utt.onerror = (e) => { state.isSpeaking = false; if (onEnd) onEnd(); };
     window.speechSynthesis.speak(utt);
-  }, 80);
+  }, 100);
 }
+
+function speakText(text, onEnd) { speakWithSystem(text, onEnd); }
 
 function _setSpeakingUI(active) {
   const ring = document.getElementById('speakingRing');
@@ -342,92 +217,6 @@ function _setSpeakingUI(active) {
   if (ring) ring.classList.toggle('active', active);
   if (lbl)  lbl.textContent = active ? '🔊 Hablando...' : '🔊 Listo';
 }
-
-function _populateSystemPicker(voices) {
-  const select = document.getElementById('voicePicker');
-  if (!select) return;
-  const esVoices = voices.filter(v => v.lang.startsWith('es'));
-  // Incluir también Siri aunque su lang no empiece con 'es' (en Safari puede ser 'es-419' u otro)
-  const siriVoices = voices.filter(v => v.name.toLowerCase().includes('siri') && !esVoices.includes(v));
-  const allVoices = [...esVoices, ...siriVoices];
-  if (!allVoices.length) return;
-
-  const sorted = [...allVoices].sort((a, b) => _scoreVoice(b) - _scoreVoice(a));
-
-  select.style.display = 'block';
-  select.innerHTML = sorted.map(v => {
-    const n      = v.name.toLowerCase();
-    const isSiri = n.includes('siri');
-    const isMale = MALE_VOICE_NAMES.some(m => n.includes(m));
-    const prefix = isSiri ? '⭐' : isMale ? '♂' : '♀';
-    const label  = isSiri ? `${prefix} ${v.name} — 🎯 RECOMENDADA` : `${prefix} ${v.name} (${v.lang})`;
-    return `<option value="${v.name}">${label}</option>`;
-  }).join('');
-
-  const best = _getBestVoice(allVoices);
-  if (best && best.name !== state.selectedSystemVoiceName) {
-    select.value = best.name;
-    state.selectedSystemVoiceName = best.name;
-    _setTTSBadge('system', best.name);
-  }
-
-  select.onchange = () => {
-    state.selectedSystemVoiceName = select.value;
-    _setTTSBadge('system', select.value);
-    speakWithSystem('Hola, soy Mauricio. Cuénteme.');
-  };
-}
-
-// Re-scan periódico: Safari carga Siri de forma diferida (hasta 3-4s después del DOMContentLoaded)
-// Cuando Siri aparece, actualizamos el selector automáticamente
-function _startVoiceRescan() {
-  let scansLeft = 8; // escanear hasta 8 veces (cada 1.5s = hasta 12s)
-  state.voiceScanInterval = setInterval(() => {
-    if (state.useKokoro) { clearInterval(state.voiceScanInterval); return; }
-    const voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
-    const hasSiri = voices.some(v => v.name.toLowerCase().includes('siri'));
-    if (hasSiri) {
-      clearInterval(state.voiceScanInterval);
-      // Siri encontrada — repoblar selector y seleccionarla
-      _populateSystemPicker(voices);
-      // Si aún no hay elección manual, forzar Siri
-      if (!state.selectedSystemVoiceName || !state.selectedSystemVoiceName.toLowerCase().includes('siri')) {
-        const siriVoice = voices.find(v => v.name.toLowerCase().includes('siri'));
-        if (siriVoice) {
-          state.selectedSystemVoiceName = siriVoice.name;
-          const sel = document.getElementById('voicePicker');
-          if (sel) sel.value = siriVoice.name;
-          _setTTSBadge('system', siriVoice.name);
-        }
-      }
-    }
-    scansLeft--;
-    if (scansLeft <= 0) clearInterval(state.voiceScanInterval);
-  }, 1500);
-}
-
-function _waitForVoicesAndPopulate() {
-  if (!window.speechSynthesis) return;
-  const voices = window.speechSynthesis.getVoices();
-  if (voices.length > 0) _populateSystemPicker(voices);
-  window.speechSynthesis.onvoiceschanged = () => {
-    if (!state.useKokoro) _populateSystemPicker(window.speechSynthesis.getVoices());
-  };
-  // Re-scan diferido para Siri en Safari
-  _startVoiceRescan();
-}
-
-// ─── FUNCIÓN PRINCIPAL DE SÍNTESIS ───────────────────────────────────────────
-function speakText(text, onEnd) {
-  if (state.useKokoro && state.kokoroReady) speakWithKokoro(text, onEnd);
-  else speakWithSystem(text, onEnd);
-}
-
-document.addEventListener('change', (e) => {
-  if (e.target.id !== 'voicePicker') return;
-  // Solo manejar voces Kokoro; las del sistema las maneja select.onchange
-  if (e.target.value.startsWith('kokoro_')) state.selectedKokoroVoice = e.target.value.replace('kokoro_', '');
-});
 
 // ─── RECONOCIMIENTO DE VOZ ────────────────────────────────────────────────────
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -444,8 +233,8 @@ if (SpeechRecognition) {
     if (el) el.textContent = transcript;
     if (e.results[e.results.length - 1].isFinal) handleVoiceInput(transcript);
   };
-  recognition.onend = () => { state.recognitionActive = false; if (state.isListening) { _cleanupListeningUI(); state.isListening = false; } };
-  recognition.onerror = (e) => { state.recognitionActive = false; state.isListening = false; _cleanupListeningUI(); };
+  recognition.onend   = () => { state.recognitionActive = false; if (state.isListening) { _cleanupListeningUI(); state.isListening = false; } };
+  recognition.onerror = () => { state.recognitionActive = false; state.isListening = false; _cleanupListeningUI(); };
 }
 
 function _cleanupListeningUI() {
@@ -493,13 +282,13 @@ function updateSessionCounter() {
 }
 function resetState() {
   stopListening();
-  if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) window.speechSynthesis.cancel();
+  if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending))
+    window.speechSynthesis.cancel();
   state.currentPhase = 'name';
-  state.phaseIndex = 0;
-  state.scores = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
+  state.scores   = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
   state.attempts = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
   state.totalScore = 0;
-  state.streak = 0;
+  state.streak     = 0;
   state.sessionLog = [];
   updateScoreBadge();
   phases.forEach(p => {
@@ -517,7 +306,7 @@ function resetState() {
 // ─── FASES ────────────────────────────────────────────────────────────────────
 function loadPhase(phase) {
   state.currentPhase = phase;
-  const data = arbol[phase];
+  const data        = arbol[phase];
   const personality = personalities[state.difficulty] || personalities['curioso'];
   const badge = document.getElementById('currentPhaseBadge');
   if (badge) badge.textContent = phase.toUpperCase();
@@ -541,8 +330,8 @@ function loadPhase(phase) {
 }
 function renderOptions(opts) {
   const grid = document.getElementById('optionsGrid');
-  const labels = ['A', 'B', 'C'];
   if (!grid) return;
+  const labels = ['A', 'B', 'C'];
   grid.innerHTML = opts.map((opt, i) => `
     <button class="option-btn" onclick="selectOption(${i})">
       <span class="option-label">${labels[i]}</span>
@@ -562,18 +351,20 @@ function processChoice(opt) {
   state.phaseHistory[state.currentPhase].push(opt.quality);
   state.sessionLog.push({ phase: state.currentPhase, quality: opt.quality });
   updateScoreBadge();
-  const sS = document.getElementById('sidebarScore');
-  const sT = document.getElementById('sidebarStreak');
-  if (sS) sS.textContent = state.totalScore;
-  if (sT) sT.textContent = '🔥 ' + state.streak;
+  const sS = document.getElementById('sidebarScore'); if (sS) sS.textContent = state.totalScore;
+  const sT = document.getElementById('sidebarStreak'); if (sT) sT.textContent = '🔥 ' + state.streak;
   const fb  = document.getElementById('feedbackArea');
   const fbc = document.getElementById('feedbackContent');
   if (fb && fbc) {
     fb.style.display = 'block';
-    fbc.className = 'feedback-content ' + (isCorrect ? 'success' : isOk ? 'warning' : 'error');
-    fbc.innerHTML = `<strong>${opt.feedback}</strong><div class="feedback-quote">${opt.quote}</div>`;
+    fbc.className    = 'feedback-content ' + (isCorrect ? 'success' : isOk ? 'warning' : 'error');
+    fbc.innerHTML    = `<strong>${opt.feedback}</strong><div class="feedback-quote">${opt.quote}</div>`;
   }
-  if (opt.nextMauricio) setTimeout(() => { const el = document.getElementById('mauricioText'); if (el) el.textContent = opt.nextMauricio; speakText(opt.nextMauricio); }, 1500);
+  if (opt.nextMauricio) setTimeout(() => {
+    const el = document.getElementById('mauricioText');
+    if (el) el.textContent = opt.nextMauricio;
+    speakText(opt.nextMauricio);
+  }, 1500);
   const phaseEl  = document.getElementById('phase' + state.currentPhase.toUpperCase());
   const statusEl = document.getElementById('status' + state.currentPhase.toUpperCase());
   if (phaseEl && statusEl) { phaseEl.classList.remove('active'); phaseEl.classList.add('done'); statusEl.textContent = isCorrect ? '✅' : isOk ? '⚠️' : '❌'; }
@@ -583,20 +374,16 @@ function processChoice(opt) {
   }, isCorrect ? 2500 : 3500);
 }
 
-// ─── VOZ ─────────────────────────────────────────────────────────────────────────
+// ─── VOZ (RECONOCIMIENTO) ─────────────────────────────────────────────────────
 function toggleVoice() { state.isListening ? stopListening() : startListening(); }
 function startListening() {
-  if (!recognition) { alert('Usá Safari en macOS para voz.'); return; }
+  if (!recognition) { alert('Usá Safari en macOS para reconocimiento de voz.'); return; }
   if (state.recognitionActive) return;
   state.isListening = true;
-  const btn = document.getElementById('btnVoice');
-  const lbl = document.getElementById('voiceLabel');
-  const vt  = document.getElementById('voiceTranscript');
-  const tt  = document.getElementById('transcriptText');
-  if (btn) btn.classList.add('listening');
-  if (lbl) lbl.textContent = 'Escuchando...';
-  if (vt)  vt.style.display = 'flex';
-  if (tt)  tt.textContent   = 'Esperando...';
+  const btn = document.getElementById('btnVoice'); if (btn) btn.classList.add('listening');
+  const lbl = document.getElementById('voiceLabel'); if (lbl) lbl.textContent = 'Escuchando...';
+  const vt  = document.getElementById('voiceTranscript'); if (vt) vt.style.display = 'flex';
+  const tt  = document.getElementById('transcriptText'); if (tt) tt.textContent = 'Esperando...';
   try { recognition.start(); } catch (e) { state.isListening = false; _cleanupListeningUI(); }
 }
 function stopListening() {
@@ -628,7 +415,7 @@ function toggleVoiceChat() {
 }
 function repeatMauricio() { const el = document.getElementById('mauricioText'); if (el) speakText(el.textContent); }
 
-// ─── RESULTADOS ───────────────────────────────────────────────────────────────────
+// ─── RESULTADOS ───────────────────────────────────────────────────────────────
 function calcPhaseAvg(phase) {
   const hist = state.phaseHistory[phase];
   if (!hist.length) return null;
@@ -637,8 +424,7 @@ function calcPhaseAvg(phase) {
 }
 function showResults() {
   showScreen('screenResults');
-  const total = state.totalScore;
-  const maxScore = phases.length * 3;
+  const total = state.totalScore, maxScore = phases.length * 3;
   const pct = Math.round((total / maxScore) * 100);
   let icon = '🏆', title = '¡Pitch dominado!', subtitle = 'Estás listo para el lunes.';
   if (pct < 40) { icon = '😅'; title = 'Hay que practicar más'; subtitle = 'Repetí antes del lunes.'; }
@@ -649,7 +435,7 @@ function showResults() {
   updateScoreBadge();
   const grid = document.getElementById('resultsGrid');
   if (grid) grid.innerHTML = phases.map(p => {
-    const s = state.scores[p]; const avg = calcPhaseAvg(p);
+    const s = state.scores[p], avg = calcPhaseAvg(p);
     const cls = s >= 3 ? 'good' : s >= 1 ? 'ok' : 'bad';
     const lbl = s >= 3 ? 'Perfecto' : s >= 1 ? 'Mejorable' : 'Repasar';
     const trend = avg !== null ? `<div class="result-trend">${avg}% histórico</div>` : '';
@@ -718,6 +504,5 @@ function updateScoreBadge() { const el = document.getElementById('scoreBadge'); 
   if (toggle) toggle.addEventListener('click', () => { theme = theme === 'dark' ? 'light' : 'dark'; html.setAttribute('data-theme', theme); });
   buildCheatsheet();
   updateSessionCounter();
-  _waitForVoicesAndPopulate(); // inicia re-scan periódico para Siri
-  initKokoro();                // intenta Kokoro en background
+  _initVoices(); // carga voces del sistema sin Kokoro
 })();
