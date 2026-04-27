@@ -1,15 +1,16 @@
-// BlueIA Pitch Trainer — v4.7
-// TTS: ElevenLabs API (voz Tomás, rioplatense nativo) con fallback Web Speech API.
+// BlueIA Pitch Trainer — v4.8
+// TTS: proxy propio /tts → ElevenLabs (key en variable de entorno del Worker)
+// Sin API key en el frontend. Sin desplegable de voces.
 
-// ─── CONFIG ELEVENLABS ────────────────────────────────────────────────────────
-const EL_API_KEY  = 'sk_7028c75eeda3f5e9fd2eba9b9e2826a470cfaae0f3003e12';
-const EL_VOICE_ID = 'QK4xDwo9ESPHA4JNUpX3'; // Tomás — Argentina & Uruguay, rioplatense
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const EL_VOICE_ID = 'QK4xDwo9ESPHA4JNUpX3'; // Tomás — Argentina & Uruguay
 const EL_MODEL    = 'eleven_multilingual_v2';
 const EL_SETTINGS = { stability: 0.55, similarity_boost: 0.80, style: 0.20, use_speaker_boost: true };
+const TTS_PROXY   = '/tts'; // Worker propio, no llama a ElevenLabs directamente
 
 const _audioCache = new Map();
 
-// ─── ESTADO GLOBAL ───────────────────────────────────────────────────────────
+// ─── ESTADO GLOBAL ────────────────────────────────────────────────────────────
 const state = {
   difficulty: 'curioso',
   currentPhase: 'name',
@@ -27,12 +28,11 @@ const state = {
   sessionCount: 0,
   phaseHistory: { name: [], same: [], frame: [], aim: [], game: [] },
   unlockedDifficult: false,
-  selectedVoice: null,
   useElevenLabs: true
 };
 const phases = ['name', 'same', 'frame', 'aim', 'game'];
 
-// ─── ÁRBOL DE DECISIONES ─────────────────────────────────────────────────────
+// ─── ÁRBOL DE DECISIONES ──────────────────────────────────────────────────────
 const arbol = {
   name: {
     mauricio: [
@@ -121,26 +121,26 @@ const personalities = {
   dificil:   { name: '😤 Difícil', responseStyle: (a) => a.find(m => m.type === 'esceptico') || a[a.length-1] }
 };
 
-// ─── TTS: ELEVENLABS ─────────────────────────────────────────────────────────
+// ─── TTS: PROXY PROPIO → ELEVENLABS ──────────────────────────────────────────
 async function _speakElevenLabs(text, onEnd) {
   const badge = document.getElementById('ttsEngineBadge');
   if (_audioCache.has(text)) { _playCachedAudio(_audioCache.get(text), onEnd); return; }
   _setSpeakingUI(true);
   if (badge) { badge.textContent = '⏳ Generando voz...'; badge.style.color = '#f59e0b'; }
   try {
-    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${EL_VOICE_ID}`, {
+    const res = await fetch(TTS_PROXY, {
       method: 'POST',
-      headers: { 'xi-api-key': EL_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, model_id: EL_MODEL, voice_settings: EL_SETTINGS })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voiceId: EL_VOICE_ID, model: EL_MODEL, settings: EL_SETTINGS })
     });
-    if (!res.ok) throw new Error('ElevenLabs HTTP ' + res.status);
+    if (!res.ok) throw new Error('Proxy TTS error ' + res.status);
     const blob = await res.blob();
     const url  = URL.createObjectURL(blob);
     _audioCache.set(text, url);
     if (badge) { badge.textContent = '🎙 Tomás (ElevenLabs)'; badge.style.color = '#22c55e'; badge.style.border = '1px solid #22c55e55'; }
     _playCachedAudio(url, onEnd);
   } catch (err) {
-    console.warn('[ElevenLabs] fallo, usando Web Speech:', err);
+    console.warn('[TTS proxy] fallo, usando Web Speech:', err);
     state.useElevenLabs = false;
     if (badge) { badge.textContent = '🔊 Voz del sistema (fallback)'; badge.style.color = '#f59e0b'; }
     _speakWebSpeech(text, onEnd);
@@ -174,52 +174,40 @@ function _scoreVoice(v) {
   return score;
 }
 
-function _buildPicker(all) {
-  const select = document.getElementById('voicePicker');
-  const hint   = document.getElementById('voiceHint');
-  const warn   = document.getElementById('noVoiceWarning');
-  if (!select) return;
-  const esVoices = all.filter(v => _scoreVoice(v) > 0).sort((a,b) => _scoreVoice(b) - _scoreVoice(a));
-  if (esVoices.length === 0) {
-    if (warn) warn.style.display = 'block';
-    const fallback = all[0];
-    if (fallback) { state.selectedVoice = fallback; select.innerHTML = `<option value="0">${fallback.name} (${fallback.lang}) — fallback</option>`; }
-    return;
-  }
-  select.innerHTML = esVoices.map((v,i) => {
-    const isMale = MALE_NAME_FRAGMENTS.some(m => v.name.toLowerCase().includes(m));
-    const isPremium = /premium|enhanced|neural|natural/i.test(v.name);
-    return `<option value="${i}">${isMale ? '♂' : '♀'} ${v.name} (${v.lang})${isPremium ? ' ⭐' : ''}</option>`;
-  }).join('');
-  select._voices = esVoices;
-  state.selectedVoice = esVoices[0];
-  select.value = '0';
-  if (hint) hint.textContent = `Fallback: ${esVoices.length} voz${esVoices.length>1?'es':''} del sistema disponible${esVoices.length>1?'s':''}.`;
-  select.onchange = () => { const idx = parseInt(select.value,10); const v = select._voices?.[idx]; if (v) state.selectedVoice = v; };
+let _selectedVoice = null;
+let _ttsDebounce = null;
+
+function _initFallbackVoice() {
+  if (!window.speechSynthesis) return;
+  const pick = (voices) => {
+    const es = voices.filter(v => _scoreVoice(v) > 0).sort((a,b) => _scoreVoice(b) - _scoreVoice(a));
+    _selectedVoice = es[0] || voices[0] || null;
+  };
+  const v = window.speechSynthesis.getVoices();
+  if (v.length > 0) pick(v);
+  else window.speechSynthesis.onvoiceschanged = () => pick(window.speechSynthesis.getVoices());
 }
 
-let _ttsDebounce = null;
 function _speakWebSpeech(text, onEnd) {
   if (!window.speechSynthesis) { if (onEnd) onEnd(); return; }
   clearTimeout(_ttsDebounce);
   _ttsDebounce = setTimeout(() => {
     if (window.speechSynthesis.speaking || window.speechSynthesis.pending) window.speechSynthesis.cancel();
     const utt = new SpeechSynthesisUtterance(text);
-    const voice = state.selectedVoice;
-    if (voice) { utt.voice = voice; utt.lang = voice.lang; } else { utt.lang = 'es-MX'; }
+    if (_selectedVoice) { utt.voice = _selectedVoice; utt.lang = _selectedVoice.lang; } else { utt.lang = 'es-MX'; }
     utt.rate = 0.82; utt.pitch = 0.78; utt.volume = 1.0;
     utt.onstart = () => _setSpeakingUI(true);
     const keepAlive = setInterval(() => {
       if (!window.speechSynthesis.speaking) { clearInterval(keepAlive); return; }
       window.speechSynthesis.pause(); window.speechSynthesis.resume();
     }, 10000);
-    utt.onend = () => { clearInterval(keepAlive); _setSpeakingUI(false); if (onEnd) onEnd(); };
+    utt.onend  = () => { clearInterval(keepAlive); _setSpeakingUI(false); if (onEnd) onEnd(); };
     utt.onerror = (e) => { console.warn('[WebSpeech]', e.error); _setSpeakingUI(false); if (onEnd) onEnd(); };
     window.speechSynthesis.speak(utt);
   }, 80);
 }
 
-// ─── speakText: punto de entrada único ───────────────────────────────────────
+// ─── speakText: punto de entrada único ────────────────────────────────────────
 function speakText(text, onEnd) {
   state.useElevenLabs ? _speakElevenLabs(text, onEnd) : _speakWebSpeech(text, onEnd);
 }
@@ -361,7 +349,7 @@ function processChoice(opt) {
   }, isCorrect ? 2400 : 3400);
 }
 
-// ─── VOZ (RECONOCIMIENTO) ────────────────────────────────────────────────────
+// ─── VOZ (RECONOCIMIENTO) ─────────────────────────────────────────────────────
 function toggleVoice() { state.isListening ? stopListening() : startListening(); }
 function startListening() {
   if (!recognition) { alert('Reconocimiento de voz no disponible en este browser.'); return; }
@@ -477,7 +465,7 @@ function updateScoreBadge() {
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 (function init() {
-  const html = document.documentElement;
+  const html   = document.documentElement;
   const toggle = document.getElementById('themeToggle');
   let theme = html.getAttribute('data-theme') || 'dark';
   if (toggle) toggle.addEventListener('click', () => {
@@ -486,11 +474,7 @@ function updateScoreBadge() {
   });
   buildCheatsheet();
   updateSessionCounter();
+  _initFallbackVoice();
   const badge = document.getElementById('ttsEngineBadge');
   if (badge) { badge.textContent = '🎙 Tomás (ElevenLabs)'; badge.style.color = '#22c55e'; badge.style.border = '1px solid #22c55e55'; }
-  if (window.speechSynthesis) {
-    const v = window.speechSynthesis.getVoices();
-    if (v.length > 0) _buildPicker(v);
-    else window.speechSynthesis.onvoiceschanged = () => { const vv = window.speechSynthesis.getVoices(); if (vv.length > 0) _buildPicker(vv); };
-  }
 })();
