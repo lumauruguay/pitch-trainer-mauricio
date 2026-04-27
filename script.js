@@ -1,6 +1,15 @@
-// BlueIA Pitch Trainer — v4.5
-// TTS: Web Speech API nativa, configurada correctamente para máxima calidad masculina en español.
-// Sin Piper. Sin Kokoro. Sin imports externos. Funciona en Chrome, Safari, Brave, Android, iOS.
+// BlueIA Pitch Trainer — v4.6
+// TTS: ElevenLabs API (voz Dante, rioplatense natural) con fallback Web Speech API.
+// Sin Piper. Sin Kokoro. Funciona en Chrome, Safari, Brave, Android.
+
+// ─── CONFIG ELEVENLABS ────────────────────────────────────────────────────────
+const EL_API_KEY  = 'sk_7028c75eeda3f5e9fd2eba9b9e2826a470cfaae0f3003e12';
+const EL_VOICE_ID = 'DzZyY3xqjLUXGaT9wykC'; // Dante — rioplatense masculino
+const EL_MODEL    = 'eleven_multilingual_v2';
+const EL_SETTINGS = { stability: 0.55, similarity_boost: 0.80, style: 0.20, use_speaker_boost: true };
+
+// Cache de audio para no repetir llamadas a la API con el mismo texto
+const _audioCache = new Map();
 
 // ─── ESTADO GLOBAL ───────────────────────────────────────────────────────────
 const state = {
@@ -20,7 +29,8 @@ const state = {
   sessionCount: 0,
   phaseHistory: { name: [], same: [], frame: [], aim: [], game: [] },
   unlockedDifficult: false,
-  selectedVoice: null   // SpeechSynthesisVoice object
+  selectedVoice: null,
+  useElevenLabs: true  // false si falla la API
 };
 const phases = ['name', 'same', 'frame', 'aim', 'game'];
 
@@ -113,70 +123,88 @@ const personalities = {
   dificil:   { name: '😤 Difícil', responseStyle: (a) => a.find(m => m.type === 'esceptico') || a[a.length-1] }
 };
 
-// ─── TTS: WEB SPEECH API ─────────────────────────────────────────────────────
-// Estrategia de selección de voz:
-// 1. Priorizar voces masculinas con nombre conocido en español
-// 2. Luego cualquier voz es-MX, es-AR, es-ES, es-419
-// 3. Configurar pitch bajo + rate lento para sonar masculino y natural
-// 4. Usar el lang EXACTO de la voz elegida (no forzar es-MX sobre una voz inglesa)
+// ─── TTS: ELEVENLABS ─────────────────────────────────────────────────────────
+async function _speakElevenLabs(text, onEnd) {
+  const badge = document.getElementById('ttsEngineBadge');
 
-// Nombres masculinos conocidos en los distintos sistemas operativos
+  // Usar cache si ya se generó este texto antes
+  if (_audioCache.has(text)) {
+    _playCachedAudio(_audioCache.get(text), onEnd);
+    return;
+  }
+
+  _setSpeakingUI(true);
+  if (badge) { badge.textContent = '⏳ Generando voz...'; badge.style.color = '#f59e0b'; }
+
+  try {
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${EL_VOICE_ID}`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': EL_API_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        text,
+        model_id: EL_MODEL,
+        voice_settings: EL_SETTINGS
+      })
+    });
+
+    if (!res.ok) throw new Error('ElevenLabs HTTP ' + res.status);
+
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    _audioCache.set(text, url);
+
+    if (badge) { badge.textContent = '🎙 Dante (ElevenLabs)'; badge.style.color = '#22c55e'; badge.style.border = '1px solid #22c55e55'; }
+    _playCachedAudio(url, onEnd);
+
+  } catch (err) {
+    console.warn('[ElevenLabs] fallo, usando Web Speech:', err);
+    state.useElevenLabs = false;
+    if (badge) { badge.textContent = '🔊 Voz del sistema (fallback)'; badge.style.color = '#f59e0b'; }
+    _speakWebSpeech(text, onEnd);
+  }
+}
+
+function _playCachedAudio(url, onEnd) {
+  const audio = new Audio(url);
+  audio.onended  = () => { _setSpeakingUI(false); if (onEnd) onEnd(); };
+  audio.onerror  = () => { _setSpeakingUI(false); if (onEnd) onEnd(); };
+  audio.play().catch(() => { _setSpeakingUI(false); if (onEnd) onEnd(); });
+}
+
+// ─── TTS: WEB SPEECH (FALLBACK) ───────────────────────────────────────────────
 const MALE_NAME_FRAGMENTS = [
   'jorge','juan','diego','carlos','miguel','pedro','alejandro','antonio',
   'reed','rocko','grandpa','eddy','fred','tom','daniel','luca','thomas','oliver'
 ];
-
-// Locales de español, ordenados por preferencia
 const ES_LOCALES_PREF = ['es-mx','es-ar','es-us','es-cl','es-co','es-419','es-es','es'];
 
 function _scoreVoice(v) {
-  const name  = v.name.toLowerCase();
-  const lang  = v.lang.toLowerCase();
+  const name = v.name.toLowerCase();
+  const lang = v.lang.toLowerCase();
   let score = 0;
-
-  // Bonus por locale español
   const li = ES_LOCALES_PREF.indexOf(lang);
-  if (li !== -1)  score += 50 - li * 3;
+  if (li !== -1) score += 50 - li * 3;
   else if (lang.startsWith('es')) score += 20;
-  else return 0; // voz que no es español: ignorar
-
-  // Bonus por nombre masculino conocido
+  else return 0;
   if (MALE_NAME_FRAGMENTS.some(m => name.includes(m))) score += 30;
-
-  // Penalizar voces compactas/low quality
   if (name.includes('compact') || name.includes('small')) score -= 15;
-
-  // Bonus voces premium del sistema
-  if (name.includes('premium') || name.includes('enhanced') || name.includes('neural') || name.includes('natural')) score += 20;
-
+  if (/premium|enhanced|neural|natural/i.test(name)) score += 20;
   return score;
-}
-
-let _voicesReady = false;
-
-function _loadVoices() {
-  if (!window.speechSynthesis) return;
-  const all = window.speechSynthesis.getVoices();
-  if (all.length === 0) return; // onvoiceschanged lo va a reintentar
-  _voicesReady = true;
-  _buildPicker(all);
 }
 
 function _buildPicker(all) {
   const select = document.getElementById('voicePicker');
-  const badge  = document.getElementById('ttsEngineBadge');
   const hint   = document.getElementById('voiceHint');
   const warn   = document.getElementById('noVoiceWarning');
   if (!select) return;
 
-  // Filtrar SOLO voces en español con score > 0
   const esVoices = all.filter(v => _scoreVoice(v) > 0).sort((a,b) => _scoreVoice(b) - _scoreVoice(a));
 
   if (esVoices.length === 0) {
-    // No hay voces en español en este sistema
     if (warn) warn.style.display = 'block';
-    if (badge) { badge.textContent = '⚠️ Sin voces ES'; badge.style.background='#f59e0b22'; badge.style.color='#f59e0b'; }
-    // Usamos la primera disponible de cualquier idioma como fallback final
     const fallback = all[0];
     if (fallback) {
       state.selectedVoice = fallback;
@@ -185,93 +213,54 @@ function _buildPicker(all) {
     return;
   }
 
-  // Construir opciones
   select.innerHTML = esVoices.map((v,i) => {
     const isMale = MALE_NAME_FRAGMENTS.some(m => v.name.toLowerCase().includes(m));
     const isPremium = /premium|enhanced|neural|natural/i.test(v.name);
-    const label = `${isMale ? '♂' : '♀'} ${v.name} (${v.lang})${isPremium ? ' ⭐' : ''}`;
-    return `<option value="${i}">${label}</option>`;
+    return `<option value="${i}">${isMale ? '♂' : '♀'} ${v.name} (${v.lang})${isPremium ? ' ⭐' : ''}</option>`;
   }).join('');
 
-  // Guardar array en select para recuperarla por índice
   select._voices = esVoices;
-
-  // Seleccionar la mejor por defecto
-  const best = esVoices[0];
-  state.selectedVoice = best;
+  state.selectedVoice = esVoices[0];
   select.value = '0';
 
-  if (badge) {
-    badge.textContent = `♂ ${best.name} (${best.lang})`;
-    badge.style.background = '#22c55e22';
-    badge.style.color = '#22c55e';
-    badge.style.border = '1px solid #22c55e55';
-  }
-  if (hint) hint.textContent = `${esVoices.length} voz${esVoices.length>1?'es':''} en español detectada${esVoices.length>1?'s':''}. Podés cambiarla y probarla.`;
+  if (hint) hint.textContent = `Fallback: ${esVoices.length} voz${esVoices.length>1?'es':''} del sistema disponible${esVoices.length>1?'s':''}.`;
 
   select.onchange = () => {
     const idx = parseInt(select.value, 10);
     const v   = select._voices ? select._voices[idx] : null;
-    if (!v) return;
-    state.selectedVoice = v;
-    if (badge) badge.textContent = `♂ ${v.name} (${v.lang})`;
-    speakText('Hola, soy Mauricio. Cuénteme.');
+    if (v) state.selectedVoice = v;
   };
 }
 
-function _getVoice() {
-  return state.selectedVoice || null;
-}
-
 let _ttsDebounce = null;
-function speakText(text, onEnd) {
+function _speakWebSpeech(text, onEnd) {
   if (!window.speechSynthesis) { if (onEnd) onEnd(); return; }
   clearTimeout(_ttsDebounce);
   _ttsDebounce = setTimeout(() => {
-    // Cancelar cualquier utterance anterior
     if (window.speechSynthesis.speaking || window.speechSynthesis.pending)
       window.speechSynthesis.cancel();
-
-    const utt   = new SpeechSynthesisUtterance(text);
-    const voice = _getVoice();
-
-    if (voice) {
-      utt.voice  = voice;
-      // CRÍTICO: usar el lang EXACTO de la voz, no uno diferente.
-      // Si usamos es-MX sobre una voz en es-ES, el motor reinterpreta la fonética y suena raro.
-      utt.lang   = voice.lang;
-    } else {
-      utt.lang = 'es-MX';
-    }
-
-    // Parámetros calibrados para voz masculina adulta natural
-    utt.rate   = 0.82;  // más lento = más pausado, menos robótico
-    utt.pitch  = 0.78;  // tono bajo = masculino
-    utt.volume = 1.0;
-
+    const utt = new SpeechSynthesisUtterance(text);
+    const voice = state.selectedVoice;
+    if (voice) { utt.voice = voice; utt.lang = voice.lang; } else { utt.lang = 'es-MX'; }
+    utt.rate = 0.82; utt.pitch = 0.78; utt.volume = 1.0;
     utt.onstart = () => _setSpeakingUI(true);
-    utt.onend   = () => { _setSpeakingUI(false); if (onEnd) onEnd(); };
-    utt.onerror = (e) => {
-      console.warn('[TTS error]', e.error);
-      state.isSpeaking = false;
-      if (onEnd) onEnd();
-    };
-
-    window.speechSynthesis.speak(utt);
-
-    // Workaround para Safari/iOS: el motor se congela en frases largas
-    // Hacemos un ping cada 10s para mantenerlo activo
     const keepAlive = setInterval(() => {
       if (!window.speechSynthesis.speaking) { clearInterval(keepAlive); return; }
-      window.speechSynthesis.pause();
-      window.speechSynthesis.resume();
+      window.speechSynthesis.pause(); window.speechSynthesis.resume();
     }, 10000);
-    utt.onend = () => {
-      clearInterval(keepAlive);
-      _setSpeakingUI(false);
-      if (onEnd) onEnd();
-    };
+    utt.onend = () => { clearInterval(keepAlive); _setSpeakingUI(false); if (onEnd) onEnd(); };
+    utt.onerror = (e) => { console.warn('[WebSpeech]', e.error); _setSpeakingUI(false); if (onEnd) onEnd(); };
+    window.speechSynthesis.speak(utt);
   }, 80);
+}
+
+// ─── speakText: punto de entrada único ───────────────────────────────────────
+function speakText(text, onEnd) {
+  if (state.useElevenLabs) {
+    _speakElevenLabs(text, onEnd);
+  } else {
+    _speakWebSpeech(text, onEnd);
+  }
 }
 
 function _setSpeakingUI(active) {
@@ -548,23 +537,13 @@ function updateScoreBadge() {
   buildCheatsheet();
   updateSessionCounter();
 
-  if (!window.speechSynthesis) {
-    const b = document.getElementById('ttsEngineBadge');
-    if (b) { b.textContent = '❌ Sin TTS'; b.style.color='#f87171'; }
-    return;
-  }
+  const badge = document.getElementById('ttsEngineBadge');
+  if (badge) { badge.textContent = '🎙 Dante (ElevenLabs)'; badge.style.color = '#22c55e'; badge.style.border = '1px solid #22c55e55'; }
 
-  // Cargar voces — en Chrome están disponibles al instante;
-  // en Safari/Firefox llegan con onvoiceschanged
-  const v = window.speechSynthesis.getVoices();
-  if (v.length > 0) {
-    _buildPicker(v);
-  } else {
-    const b = document.getElementById('ttsEngineBadge');
-    if (b) { b.textContent = '⏳ Cargando voces...'; }
-    window.speechSynthesis.onvoiceschanged = () => {
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) _buildPicker(voices);
-    };
+  // Cargar voces Web Speech como fallback silencioso
+  if (window.speechSynthesis) {
+    const v = window.speechSynthesis.getVoices();
+    if (v.length > 0) { _buildPicker(v); }
+    else { window.speechSynthesis.onvoiceschanged = () => { const vv = window.speechSynthesis.getVoices(); if (vv.length > 0) _buildPicker(vv); }; }
   }
 })();
