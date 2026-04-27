@@ -1,14 +1,12 @@
-// BlueIA Pitch Trainer — v4.6
-// TTS: ElevenLabs API (voz Dante, rioplatense natural) con fallback Web Speech API.
-// Sin Piper. Sin Kokoro. Funciona en Chrome, Safari, Brave, Android.
+// BlueIA Pitch Trainer — v4.7
+// TTS: ElevenLabs API (voz Tomás, rioplatense nativo) con fallback Web Speech API.
 
 // ─── CONFIG ELEVENLABS ────────────────────────────────────────────────────────
 const EL_API_KEY  = 'sk_7028c75eeda3f5e9fd2eba9b9e2826a470cfaae0f3003e12';
-const EL_VOICE_ID = 'DzZyY3xqjLUXGaT9wykC'; // Dante — rioplatense masculino
+const EL_VOICE_ID = 'QK4xDwo9ESPHA4JNUpX3'; // Tomás — Argentina & Uruguay, rioplatense
 const EL_MODEL    = 'eleven_multilingual_v2';
 const EL_SETTINGS = { stability: 0.55, similarity_boost: 0.80, style: 0.20, use_speaker_boost: true };
 
-// Cache de audio para no repetir llamadas a la API con el mismo texto
 const _audioCache = new Map();
 
 // ─── ESTADO GLOBAL ───────────────────────────────────────────────────────────
@@ -30,7 +28,7 @@ const state = {
   phaseHistory: { name: [], same: [], frame: [], aim: [], game: [] },
   unlockedDifficult: false,
   selectedVoice: null,
-  useElevenLabs: true  // false si falla la API
+  useElevenLabs: true
 };
 const phases = ['name', 'same', 'frame', 'aim', 'game'];
 
@@ -126,39 +124,21 @@ const personalities = {
 // ─── TTS: ELEVENLABS ─────────────────────────────────────────────────────────
 async function _speakElevenLabs(text, onEnd) {
   const badge = document.getElementById('ttsEngineBadge');
-
-  // Usar cache si ya se generó este texto antes
-  if (_audioCache.has(text)) {
-    _playCachedAudio(_audioCache.get(text), onEnd);
-    return;
-  }
-
+  if (_audioCache.has(text)) { _playCachedAudio(_audioCache.get(text), onEnd); return; }
   _setSpeakingUI(true);
   if (badge) { badge.textContent = '⏳ Generando voz...'; badge.style.color = '#f59e0b'; }
-
   try {
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${EL_VOICE_ID}`, {
       method: 'POST',
-      headers: {
-        'xi-api-key': EL_API_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        text,
-        model_id: EL_MODEL,
-        voice_settings: EL_SETTINGS
-      })
+      headers: { 'xi-api-key': EL_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, model_id: EL_MODEL, voice_settings: EL_SETTINGS })
     });
-
     if (!res.ok) throw new Error('ElevenLabs HTTP ' + res.status);
-
     const blob = await res.blob();
     const url  = URL.createObjectURL(blob);
     _audioCache.set(text, url);
-
-    if (badge) { badge.textContent = '🎙 Dante (ElevenLabs)'; badge.style.color = '#22c55e'; badge.style.border = '1px solid #22c55e55'; }
+    if (badge) { badge.textContent = '🎙 Tomás (ElevenLabs)'; badge.style.color = '#22c55e'; badge.style.border = '1px solid #22c55e55'; }
     _playCachedAudio(url, onEnd);
-
   } catch (err) {
     console.warn('[ElevenLabs] fallo, usando Web Speech:', err);
     state.useElevenLabs = false;
@@ -169,8 +149,8 @@ async function _speakElevenLabs(text, onEnd) {
 
 function _playCachedAudio(url, onEnd) {
   const audio = new Audio(url);
-  audio.onended  = () => { _setSpeakingUI(false); if (onEnd) onEnd(); };
-  audio.onerror  = () => { _setSpeakingUI(false); if (onEnd) onEnd(); };
+  audio.onended = () => { _setSpeakingUI(false); if (onEnd) onEnd(); };
+  audio.onerror = () => { _setSpeakingUI(false); if (onEnd) onEnd(); };
   audio.play().catch(() => { _setSpeakingUI(false); if (onEnd) onEnd(); });
 }
 
@@ -182,8 +162,7 @@ const MALE_NAME_FRAGMENTS = [
 const ES_LOCALES_PREF = ['es-mx','es-ar','es-us','es-cl','es-co','es-419','es-es','es'];
 
 function _scoreVoice(v) {
-  const name = v.name.toLowerCase();
-  const lang = v.lang.toLowerCase();
+  const name = v.name.toLowerCase(), lang = v.lang.toLowerCase();
   let score = 0;
   const li = ES_LOCALES_PREF.indexOf(lang);
   if (li !== -1) score += 50 - li * 3;
@@ -200,36 +179,23 @@ function _buildPicker(all) {
   const hint   = document.getElementById('voiceHint');
   const warn   = document.getElementById('noVoiceWarning');
   if (!select) return;
-
   const esVoices = all.filter(v => _scoreVoice(v) > 0).sort((a,b) => _scoreVoice(b) - _scoreVoice(a));
-
   if (esVoices.length === 0) {
     if (warn) warn.style.display = 'block';
     const fallback = all[0];
-    if (fallback) {
-      state.selectedVoice = fallback;
-      select.innerHTML = `<option value="0">${fallback.name} (${fallback.lang}) — fallback</option>`;
-    }
+    if (fallback) { state.selectedVoice = fallback; select.innerHTML = `<option value="0">${fallback.name} (${fallback.lang}) — fallback</option>`; }
     return;
   }
-
   select.innerHTML = esVoices.map((v,i) => {
     const isMale = MALE_NAME_FRAGMENTS.some(m => v.name.toLowerCase().includes(m));
     const isPremium = /premium|enhanced|neural|natural/i.test(v.name);
     return `<option value="${i}">${isMale ? '♂' : '♀'} ${v.name} (${v.lang})${isPremium ? ' ⭐' : ''}</option>`;
   }).join('');
-
   select._voices = esVoices;
   state.selectedVoice = esVoices[0];
   select.value = '0';
-
   if (hint) hint.textContent = `Fallback: ${esVoices.length} voz${esVoices.length>1?'es':''} del sistema disponible${esVoices.length>1?'s':''}.`;
-
-  select.onchange = () => {
-    const idx = parseInt(select.value, 10);
-    const v   = select._voices ? select._voices[idx] : null;
-    if (v) state.selectedVoice = v;
-  };
+  select.onchange = () => { const idx = parseInt(select.value,10); const v = select._voices?.[idx]; if (v) state.selectedVoice = v; };
 }
 
 let _ttsDebounce = null;
@@ -237,8 +203,7 @@ function _speakWebSpeech(text, onEnd) {
   if (!window.speechSynthesis) { if (onEnd) onEnd(); return; }
   clearTimeout(_ttsDebounce);
   _ttsDebounce = setTimeout(() => {
-    if (window.speechSynthesis.speaking || window.speechSynthesis.pending)
-      window.speechSynthesis.cancel();
+    if (window.speechSynthesis.speaking || window.speechSynthesis.pending) window.speechSynthesis.cancel();
     const utt = new SpeechSynthesisUtterance(text);
     const voice = state.selectedVoice;
     if (voice) { utt.voice = voice; utt.lang = voice.lang; } else { utt.lang = 'es-MX'; }
@@ -256,11 +221,7 @@ function _speakWebSpeech(text, onEnd) {
 
 // ─── speakText: punto de entrada único ───────────────────────────────────────
 function speakText(text, onEnd) {
-  if (state.useElevenLabs) {
-    _speakElevenLabs(text, onEnd);
-  } else {
-    _speakWebSpeech(text, onEnd);
-  }
+  state.useElevenLabs ? _speakElevenLabs(text, onEnd) : _speakWebSpeech(text, onEnd);
 }
 
 function _setSpeakingUI(active) {
@@ -282,8 +243,7 @@ if (SpeechRecognition) {
   recognition.onstart  = () => { state.recognitionActive = true; };
   recognition.onresult = (e) => {
     const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
-    const el = document.getElementById('transcriptText');
-    if (el) el.textContent = transcript;
+    const el = document.getElementById('transcriptText'); if (el) el.textContent = transcript;
     if (e.results[e.results.length-1].isFinal) handleVoiceInput(transcript);
   };
   recognition.onend   = () => { state.recognitionActive = false; if (state.isListening) { _cleanupListeningUI(); state.isListening = false; } };
@@ -319,8 +279,7 @@ function unlockDifficultMode() {
   const grid = document.querySelector('.difficulty-grid');
   if (!grid || document.querySelector('[data-difficulty="dificil"]')) return;
   const btn = document.createElement('button');
-  btn.className = 'diff-btn';
-  btn.dataset.difficulty = 'dificil';
+  btn.className = 'diff-btn'; btn.dataset.difficulty = 'dificil';
   btn.setAttribute('onclick', 'selectDifficulty(this)');
   btn.innerHTML = '<span class="diff-emoji">😤</span><span class="diff-name">Difícil</span><span class="diff-desc">Desbloqueado · 3 sesiones</span>';
   grid.appendChild(btn);
@@ -330,14 +289,11 @@ function updateSessionCounter() {
 }
 function resetState() {
   stopListening();
-  if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending))
-    window.speechSynthesis.cancel();
+  if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) window.speechSynthesis.cancel();
   state.currentPhase = 'name';
   state.scores   = { name:0, same:0, frame:0, aim:0, game:0 };
   state.attempts = { name:0, same:0, frame:0, aim:0, game:0 };
-  state.totalScore = 0;
-  state.streak = 0;
-  state.sessionLog = [];
+  state.totalScore = 0; state.streak = 0; state.sessionLog = [];
   updateScoreBadge();
   phases.forEach(p => {
     const el = document.getElementById('phase' + p.toUpperCase()); if (el) el.classList.remove('active','done');
@@ -386,7 +342,7 @@ function processChoice(opt) {
   updateScoreBadge();
   const sS = document.getElementById('sidebarScore');  if (sS) sS.textContent = state.totalScore;
   const sT = document.getElementById('sidebarStreak'); if (sT) sT.textContent = '🔥 ' + state.streak;
-  const fb  = document.getElementById('feedbackArea'),   fbc = document.getElementById('feedbackContent');
+  const fb  = document.getElementById('feedbackArea'), fbc = document.getElementById('feedbackContent');
   if (fb && fbc) {
     fb.style.display = 'block';
     fbc.className = 'feedback-content ' + (isCorrect ? 'success' : isOk ? 'warning' : 'error');
@@ -405,7 +361,7 @@ function processChoice(opt) {
   }, isCorrect ? 2400 : 3400);
 }
 
-// ─── VOZ (RECONOCIMIENTO) ─────────────────────────────────────────────────────
+// ─── VOZ (RECONOCIMIENTO) ────────────────────────────────────────────────────
 function toggleVoice() { state.isListening ? stopListening() : startListening(); }
 function startListening() {
   if (!recognition) { alert('Reconocimiento de voz no disponible en este browser.'); return; }
@@ -419,8 +375,7 @@ function startListening() {
 }
 function stopListening() {
   if (!state.isListening) return;
-  state.isListening = false;
-  _cleanupListeningUI();
+  state.isListening = false; _cleanupListeningUI();
   if (state.recognitionActive) try { recognition.stop(); } catch(e) {}
 }
 function handleVoiceInput(transcript) {
@@ -434,10 +389,7 @@ function handleVoiceInput(transcript) {
     if (score > bestScore) { bestScore = score; bestMatch = i; }
   });
   if (bestScore > 0.12 && bestMatch !== null) selectOption(bestMatch);
-  else {
-    const rl = document.getElementById('responseLabel');
-    if (rl) rl.textContent = '"' + transcript.substring(0,60) + '..." — Elegí la opción más cercana:';
-  }
+  else { const rl = document.getElementById('responseLabel'); if (rl) rl.textContent = '"' + transcript.substring(0,60) + '..." — Elegí la opción más cercana:'; }
 }
 function toggleVoiceChat() {
   state.isVoiceChatMode = !state.isVoiceChatMode;
@@ -451,14 +403,13 @@ function repeatMauricio() { const el = document.getElementById('mauricioText'); 
 function calcPhaseAvg(phase) {
   const hist = state.phaseHistory[phase];
   if (!hist.length) return null;
-  const sum = hist.reduce((a,q) => a + (q==='perfect'?3:q==='ok'?1:0), 0);
-  return Math.round((sum/(hist.length*3))*100);
+  return Math.round((hist.reduce((a,q) => a + (q==='perfect'?3:q==='ok'?1:0), 0) / (hist.length*3))*100);
 }
 function showResults() {
   showScreen('screenResults');
   const total = state.totalScore, maxScore = phases.length*3, pct = Math.round((total/maxScore)*100);
   let icon='🏆', title='¡Pitch dominado!', subtitle='Estás listo para el lunes.';
-  if (pct < 40)  { icon='😅'; title='Hay que practicar más';  subtitle='Repetí antes del lunes.'; }
+  if (pct < 40)  { icon='😅'; title='Hay que practicar más'; subtitle='Repetí antes del lunes.'; }
   else if (pct < 70) { icon='💪'; title='¡Buen progreso!'; subtitle='Enfocate en las fases débiles.'; }
   const rI = document.getElementById('resultsIcon');     if (rI) rI.textContent = icon;
   const rT = document.getElementById('resultsTitle');    if (rT) rT.textContent = title;
@@ -466,8 +417,7 @@ function showResults() {
   updateScoreBadge();
   const grid = document.getElementById('resultsGrid');
   if (grid) grid.innerHTML = phases.map(p => {
-    const s = state.scores[p], avg = calcPhaseAvg(p);
-    const cls = s>=3?'good':s>=1?'ok':'bad';
+    const s = state.scores[p], avg = calcPhaseAvg(p), cls = s>=3?'good':s>=1?'ok':'bad';
     return `<div class="result-card"><div class="result-phase">${p.toUpperCase()}</div><div class="result-score ${cls}">${s>=3?'✅':s>=1?'⚠️':'❌'}</div><div class="result-label">${s>=3?'Perfecto':s>=1?'Mejorable':'Repasar'}</div>${avg!==null?`<div class="result-trend">${avg}% histórico</div>`:''}</div>`;
   }).join('');
   const weak = phases.filter(p => state.scores[p] < 3).map(p => p.toUpperCase());
@@ -527,7 +477,7 @@ function updateScoreBadge() {
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 (function init() {
-  const html   = document.documentElement;
+  const html = document.documentElement;
   const toggle = document.getElementById('themeToggle');
   let theme = html.getAttribute('data-theme') || 'dark';
   if (toggle) toggle.addEventListener('click', () => {
@@ -536,14 +486,11 @@ function updateScoreBadge() {
   });
   buildCheatsheet();
   updateSessionCounter();
-
   const badge = document.getElementById('ttsEngineBadge');
-  if (badge) { badge.textContent = '🎙 Dante (ElevenLabs)'; badge.style.color = '#22c55e'; badge.style.border = '1px solid #22c55e55'; }
-
-  // Cargar voces Web Speech como fallback silencioso
+  if (badge) { badge.textContent = '🎙 Tomás (ElevenLabs)'; badge.style.color = '#22c55e'; badge.style.border = '1px solid #22c55e55'; }
   if (window.speechSynthesis) {
     const v = window.speechSynthesis.getVoices();
-    if (v.length > 0) { _buildPicker(v); }
-    else { window.speechSynthesis.onvoiceschanged = () => { const vv = window.speechSynthesis.getVoices(); if (vv.length > 0) _buildPicker(vv); }; }
+    if (v.length > 0) _buildPicker(v);
+    else window.speechSynthesis.onvoiceschanged = () => { const vv = window.speechSynthesis.getVoices(); if (vv.length > 0) _buildPicker(vv); };
   }
 })();
