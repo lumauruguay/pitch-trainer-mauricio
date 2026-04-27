@@ -1,14 +1,15 @@
-// BlueIA Pitch Trainer — v4.8
-// TTS: proxy propio /tts → ElevenLabs (key en variable de entorno del Worker)
-// Sin API key en el frontend. Sin desplegable de voces.
+// BlueIA Pitch Trainer — v4.9
+// TTS: proxy /tts → ElevenLabs. Nunca deshabilita EL permanentemente.
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-const EL_VOICE_ID = 'QK4xDwo9ESPHA4JNUpX3'; // Tomás — Argentina & Uruguay
+const EL_VOICE_ID = 'QK4xDwo9ESPHA4JNUpX3';
 const EL_MODEL    = 'eleven_multilingual_v2';
 const EL_SETTINGS = { stability: 0.55, similarity_boost: 0.80, style: 0.20, use_speaker_boost: true };
-const TTS_PROXY   = '/tts'; // Worker propio, no llama a ElevenLabs directamente
+const TTS_PROXY   = '/tts';
+const TTS_TIMEOUT = 12000; // ms antes de abortar y usar fallback puntual
 
 const _audioCache = new Map();
+let   _elFailCount = 0; // fallos consecutivos; si llega a 3, muestra aviso pero sigue intentando
 
 // ─── ESTADO GLOBAL ────────────────────────────────────────────────────────────
 const state = {
@@ -27,8 +28,8 @@ const state = {
   sessionLog: [],
   sessionCount: 0,
   phaseHistory: { name: [], same: [], frame: [], aim: [], game: [] },
-  unlockedDifficult: false,
-  useElevenLabs: true
+  unlockedDifficult: false
+  // useElevenLabs eliminado — siempre intenta EL primero
 };
 const phases = ['name', 'same', 'frame', 'aim', 'game'];
 
@@ -121,29 +122,50 @@ const personalities = {
   dificil:   { name: '😤 Difícil', responseStyle: (a) => a.find(m => m.type === 'esceptico') || a[a.length-1] }
 };
 
-// ─── TTS: PROXY PROPIO → ELEVENLABS ──────────────────────────────────────────
+// ─── TTS: PROXY → ELEVENLABS ─────────────────────────────────────────────────
+// Siempre intenta ElevenLabs. El fallback es PUNTUAL por texto, no permanente.
 async function _speakElevenLabs(text, onEnd) {
   const badge = document.getElementById('ttsEngineBadge');
-  if (_audioCache.has(text)) { _playCachedAudio(_audioCache.get(text), onEnd); return; }
+
+  // Caché
+  if (_audioCache.has(text)) {
+    if (badge) { badge.textContent = '🎙 Tomás (ElevenLabs)'; badge.style.color = '#22c55e'; badge.style.border = '1px solid #22c55e55'; }
+    _playCachedAudio(_audioCache.get(text), onEnd);
+    return;
+  }
+
   _setSpeakingUI(true);
-  if (badge) { badge.textContent = '⏳ Generando voz...'; badge.style.color = '#f59e0b'; }
+  if (badge) { badge.textContent = '⏳ Generando...'; badge.style.color = '#f59e0b'; badge.style.border = '1px solid #f59e0b55'; }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TTS_TIMEOUT);
+
   try {
     const res = await fetch(TTS_PROXY, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voiceId: EL_VOICE_ID, model: EL_MODEL, settings: EL_SETTINGS })
+      body: JSON.stringify({ text, voiceId: EL_VOICE_ID, model: EL_MODEL, settings: EL_SETTINGS }),
+      signal: controller.signal
     });
-    if (!res.ok) throw new Error('Proxy TTS error ' + res.status);
+    clearTimeout(timer);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const blob = await res.blob();
     const url  = URL.createObjectURL(blob);
     _audioCache.set(text, url);
+    _elFailCount = 0;
     if (badge) { badge.textContent = '🎙 Tomás (ElevenLabs)'; badge.style.color = '#22c55e'; badge.style.border = '1px solid #22c55e55'; }
     _playCachedAudio(url, onEnd);
   } catch (err) {
-    console.warn('[TTS proxy] fallo, usando Web Speech:', err);
-    state.useElevenLabs = false;
-    if (badge) { badge.textContent = '🔊 Voz del sistema (fallback)'; badge.style.color = '#f59e0b'; }
-    _speakWebSpeech(text, onEnd);
+    clearTimeout(timer);
+    _elFailCount++;
+    console.warn('[TTS] fallo #' + _elFailCount + ':', err.message);
+    // Fallback puntual — solo para este texto
+    if (badge) { badge.textContent = '🔊 Voz sistema (este texto)'; badge.style.color = '#f59e0b'; badge.style.border = '1px solid #f59e0b55'; }
+    _speakWebSpeech(text, () => {
+      // Después del fallback, volver a mostrar Tomás para el próximo
+      if (badge) { badge.textContent = '🎙 Tomás (ElevenLabs)'; badge.style.color = '#22c55e'; badge.style.border = '1px solid #22c55e55'; }
+      if (onEnd) onEnd();
+    });
   }
 }
 
@@ -154,7 +176,7 @@ function _playCachedAudio(url, onEnd) {
   audio.play().catch(() => { _setSpeakingUI(false); if (onEnd) onEnd(); });
 }
 
-// ─── TTS: WEB SPEECH (FALLBACK) ───────────────────────────────────────────────
+// ─── TTS: WEB SPEECH (FALLBACK PUNTUAL) ──────────────────────────────────────
 const MALE_NAME_FRAGMENTS = [
   'jorge','juan','diego','carlos','miguel','pedro','alejandro','antonio',
   'reed','rocko','grandpa','eddy','fred','tom','daniel','luca','thomas','oliver'
@@ -175,7 +197,7 @@ function _scoreVoice(v) {
 }
 
 let _selectedVoice = null;
-let _ttsDebounce = null;
+let _ttsDebounce   = null;
 
 function _initFallbackVoice() {
   if (!window.speechSynthesis) return;
@@ -201,15 +223,15 @@ function _speakWebSpeech(text, onEnd) {
       if (!window.speechSynthesis.speaking) { clearInterval(keepAlive); return; }
       window.speechSynthesis.pause(); window.speechSynthesis.resume();
     }, 10000);
-    utt.onend  = () => { clearInterval(keepAlive); _setSpeakingUI(false); if (onEnd) onEnd(); };
+    utt.onend   = () => { clearInterval(keepAlive); _setSpeakingUI(false); if (onEnd) onEnd(); };
     utt.onerror = (e) => { console.warn('[WebSpeech]', e.error); _setSpeakingUI(false); if (onEnd) onEnd(); };
     window.speechSynthesis.speak(utt);
   }, 80);
 }
 
-// ─── speakText: punto de entrada único ────────────────────────────────────────
+// ─── speakText: entrada única ─────────────────────────────────────────────────
 function speakText(text, onEnd) {
-  state.useElevenLabs ? _speakElevenLabs(text, onEnd) : _speakWebSpeech(text, onEnd);
+  _speakElevenLabs(text, onEnd);
 }
 
 function _setSpeakingUI(active) {
