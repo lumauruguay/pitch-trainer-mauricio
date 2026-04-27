@@ -1,34 +1,35 @@
-// BlueIA Pitch Trainer — Cloudflare Worker proxy para ElevenLabs
-// La API key vive como variable de entorno EL_API_KEY en el Worker.
-// El browser llama a /tts con { text, voiceId, model, settings } y recibe audio/mpeg.
+// BlueIA Pitch Trainer — Cloudflare Pages Worker proxy para ElevenLabs
+// Sintaxis addEventListener — compatible con Cloudflare Pages sin build step.
+// Variable de entorno requerida: EL_API_KEY (Secret en Pages > Settings)
 
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
+addEventListener('fetch', event => {
+  event.respondWith(handleRequest(event.request));
+});
 
-    // ── CORS preflight ────────────────────────────────────────────────────────
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
-        },
-      });
-    }
+async function handleRequest(request) {
+  const url = new URL(request.url);
 
-    // ── Proxy TTS ─────────────────────────────────────────────────────────────
-    if (url.pathname === '/tts' && request.method === 'POST') {
-      let body;
-      try { body = await request.json(); } catch { return err(400, 'JSON inválido'); }
+  // CORS preflight
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders() });
+  }
 
-      const { text, voiceId, model, settings } = body;
-      if (!text || !voiceId) return err(400, 'Faltan text o voiceId');
+  // Proxy TTS
+  if (url.pathname === '/tts' && request.method === 'POST') {
+    let body;
+    try { body = await request.json(); }
+    catch { return errResponse(400, 'JSON inválido'); }
 
-      const apiKey = env.EL_API_KEY;
-      if (!apiKey) return err(500, 'EL_API_KEY no configurada en el Worker');
+    const { text, voiceId, model, settings } = body;
+    if (!text || !voiceId) return errResponse(400, 'Faltan text o voiceId');
 
-      const elRes = await fetch(
+    // EL_API_KEY inyectada como variable de entorno en Cloudflare Pages
+    const apiKey = typeof EL_API_KEY !== 'undefined' ? EL_API_KEY : '';
+    if (!apiKey) return errResponse(500, 'EL_API_KEY no configurada');
+
+    let elRes;
+    try {
+      elRes = await fetch(
         `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
         {
           method: 'POST',
@@ -48,29 +49,38 @@ export default {
           }),
         }
       );
-
-      if (!elRes.ok) {
-        const msg = await elRes.text();
-        return err(elRes.status, `ElevenLabs: ${msg}`);
-      }
-
-      // Devolver el audio al browser con headers CORS
-      return new Response(elRes.body, {
-        status: 200,
-        headers: {
-          'Content-Type': 'audio/mpeg',
-          'Access-Control-Allow-Origin': '*',
-          'Cache-Control': 'no-store',
-        },
-      });
+    } catch (e) {
+      return errResponse(502, 'No se pudo conectar a ElevenLabs: ' + e.message);
     }
 
-    // ── Servir archivos estáticos (comportamiento por defecto) ────────────────
-    return env.ASSETS.fetch(request);
-  },
-};
+    if (!elRes.ok) {
+      const msg = await elRes.text();
+      return errResponse(elRes.status, 'ElevenLabs: ' + msg);
+    }
 
-function err(status, msg) {
+    return new Response(elRes.body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'audio/mpeg',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'no-store',
+      },
+    });
+  }
+
+  // Todo lo demás: pasar al handler estático
+  return fetch(request);
+}
+
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+}
+
+function errResponse(status, msg) {
   return new Response(JSON.stringify({ error: msg }), {
     status,
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
