@@ -1,6 +1,5 @@
-// BlueIA Pitch Trainer — v4.1 con Kokoro TTS + fix selector voz
-// Kokoro-82M corre 100% en el browser (WebGPU/WASM), sin API key
-// Fallback automático a Web Speech API con selección manual de voz
+// BlueIA Pitch Trainer — v4.2
+// Fix: Siri (Voz 1) prioridad máxima absoluta en Safari macOS
 
 // ─── ESTADO GLOBAL ───────────────────────────────────────────────────────────
 const state = {
@@ -21,14 +20,13 @@ const state = {
   sessionCount: 0,
   phaseHistory: { name: [], same: [], frame: [], aim: [], game: [] },
   unlockedDifficult: false,
-  // TTS engine
   kokoroReady: false,
   kokoroPipeline: null,
   kokoroLoading: false,
   selectedKokoroVoice: 'hm_omega',
   useKokoro: false,
-  // Voz sistema seleccionada por el usuario (nombre exacto de la voz)
-  selectedSystemVoiceName: null
+  selectedSystemVoiceName: null,
+  voiceScanInterval: null   // para el re-scan que busca Siri
 };
 const phases = ['name', 'same', 'frame', 'aim', 'game'];
 
@@ -212,11 +210,7 @@ const personalities = {
 };
 
 // ─── KOKORO TTS ENGINE ────────────────────────────────────────────────────────
-const KOKORO_VOICE_MAP = {
-  'hm_omega': 'hm_omega',
-  'hm_psi':   'hm_psi',
-  'hf_alpha': 'hf_alpha'
-};
+const KOKORO_VOICE_MAP = { 'hm_omega': 'hm_omega', 'hm_psi': 'hm_psi', 'hf_alpha': 'hf_alpha' };
 
 function _setTTSBadge(mode, voiceName) {
   const badge  = document.getElementById('ttsEngineBadge');
@@ -224,23 +218,21 @@ function _setTTSBadge(mode, voiceName) {
   const picker = document.getElementById('voicePicker');
   if (!badge) return;
   if (mode === 'kokoro') {
-    badge.className   = 'badge-enhanced';
+    badge.className = 'badge-enhanced';
     badge.textContent = '⭐ Kokoro TTS — voz premium';
-    if (status) status.textContent = '✅ Kokoro listo · voces premium en tu browser';
+    if (status) status.textContent = '✅ Kokoro listo';
     if (picker) picker.style.display = 'block';
   } else if (mode === 'loading') {
-    badge.className   = 'badge-enhanced';
-    badge.textContent = '⏳ Cargando Kokoro (~90MB)...';
-    if (status) status.textContent = 'Descargando modelo de voz. Solo ocurre la primera vez, queda en caché.';
+    badge.className = 'badge-enhanced';
+    badge.textContent = '⏳ Cargando Kokoro...';
+    if (status) status.textContent = 'Descargando modelo. Solo ocurre la primera vez.';
   } else {
-    badge.className   = 'badge-enhanced';
+    badge.className = 'badge-enhanced';
     badge.style.background = '#6366f122';
     badge.style.color = '#818cf8';
-    const label = voiceName ? `🔄 Sistema · ${voiceName}` : '🔄 Voz del sistema';
-    badge.textContent = label;
-    if (status) status.textContent = voiceName
-      ? `Voz activa: ${voiceName}. Podés cambiarla en el selector.`
-      : 'Usando voces instaladas en tu dispositivo.';
+    const isSiri = voiceName && voiceName.toLowerCase().includes('siri');
+    badge.textContent = isSiri ? `⭐ Siri activa · ${voiceName}` : voiceName ? `🔄 Sistema · ${voiceName}` : '🔄 Voz del sistema';
+    if (status) status.textContent = voiceName ? `Voz activa: ${voiceName}` : 'Usando voces del dispositivo.';
   }
 }
 
@@ -248,24 +240,17 @@ async function initKokoro() {
   if (state.kokoroLoading || state.kokoroReady) return;
   state.kokoroLoading = true;
   _setTTSBadge('loading');
-
   try {
     const { KokoroTTS } = await import('https://cdn.jsdelivr.net/npm/kokoro-js@1/dist/kokoro.js');
-    const pipeline = await KokoroTTS.from_pretrained(
-      'onnx-community/Kokoro-82M-v1.0-ONNX',
-      { dtype: 'q8', device: 'auto' }
-    );
+    const pipeline = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', { dtype: 'q8', device: 'auto' });
     state.kokoroPipeline = pipeline;
-    state.kokoroReady    = true;
-    state.useKokoro      = true;
-    state.kokoroLoading  = false;
-    _setTTSBadge('kokoro');
-    console.log('[BlueIA TTS] Kokoro listo ✅');
-  } catch (err) {
-    console.warn('[BlueIA TTS] Kokoro no disponible, usando Web Speech API:', err.message);
+    state.kokoroReady = true;
+    state.useKokoro = true;
     state.kokoroLoading = false;
-    state.useKokoro     = false;
-    // Esperar que las voces del sistema estén disponibles, luego poblar
+    _setTTSBadge('kokoro');
+  } catch (err) {
+    state.kokoroLoading = false;
+    state.useKokoro = false;
     _waitForVoicesAndPopulate();
   }
 }
@@ -281,59 +266,53 @@ async function speakWithKokoro(text, onEnd) {
     const src    = ctx.createBufferSource();
     src.buffer   = buf;
     src.connect(ctx.destination);
-
     _setSpeakingUI(true);
-    src.onended = () => {
-      _setSpeakingUI(false);
-      ctx.close();
-      if (onEnd) onEnd();
-    };
+    src.onended = () => { _setSpeakingUI(false); ctx.close(); if (onEnd) onEnd(); };
     src.start();
   } catch (err) {
-    console.warn('[Kokoro speak error]', err.message);
     state.isSpeaking = false;
     speakWithSystem(text, onEnd);
   }
 }
 
-// ─── WEB SPEECH API FALLBACK ──────────────────────────────────────────────────
+// ─── WEB SPEECH API ──────────────────────────────────────────────────────────────
 
-// Orden de prioridad: voces masculinas específicas > neutras > femeninas
-// Eddy y Reed son las más naturales en español en macOS/Chrome
-const MALE_VOICE_PRIORITY = ['eddy','reed','rocko','grandpa','jorge','juan','diego','carlos','miguel','pedro'];
+// PRIORIDAD DE VOCES:
+// 1. Siri (cualquier variante) → score 200  ← PRIORIDAD MÁXIMA ABSOLUTA
+// 2. Voces masculinas es-MX (Eddy, Reed, Rocko...) → score 100-90
+// 3. Voces masculinas es-ES → score 80-70
+// 4. Femeninas es-MX → score 20
+// 5. Resto → score 10
+const MALE_VOICE_NAMES = ['eddy','reed','rocko','grandpa','jorge','juan','diego','carlos','miguel','pedro'];
 
 function _scoreVoice(v) {
   const n = v.name.toLowerCase();
-  // Prioridad máxima: voces masculinas conocidas en es-MX
-  const maleIdx = MALE_VOICE_PRIORITY.findIndex(m => n.includes(m));
+  // Siri SIEMPRE gana, sin importar el idioma
+  if (n.includes('siri')) return 200;
+  // Masculinas es-MX
+  const maleIdx = MALE_VOICE_NAMES.findIndex(m => n.includes(m));
   if (maleIdx !== -1 && v.lang === 'es-MX') return 100 - maleIdx;
   if (maleIdx !== -1 && v.lang.startsWith('es')) return 80 - maleIdx;
-  // Siri es siempre buena opción (solo en Safari/macOS)
-  if (n.includes('siri')) return 60;
-  // Otras voces es-MX
   if (v.lang === 'es-MX') return 20;
   if (v.lang === 'es-AR') return 15;
   if (v.lang.startsWith('es')) return 10;
   return 0;
 }
 
-function _getBestMaleVoice(voices) {
-  // Devuelve la voz con mayor score — siempre masculina si existe
-  return voices
-    .filter(v => v.lang.startsWith('es'))
-    .sort((a, b) => _scoreVoice(b) - _scoreVoice(a))[0] || voices[0] || null;
+function _getBestVoice(voices) {
+  const esVoices = voices.filter(v => v.lang.startsWith('es'));
+  if (!esVoices.length) return voices[0] || null;
+  return esVoices.sort((a, b) => _scoreVoice(b) - _scoreVoice(a))[0];
 }
 
 function _getActiveSystemVoice() {
   if (!window.speechSynthesis) return null;
   const voices = window.speechSynthesis.getVoices();
-  // Si el usuario eligió una voz manualmente, úsala
   if (state.selectedSystemVoiceName) {
     const found = voices.find(v => v.name === state.selectedSystemVoiceName);
     if (found) return found;
   }
-  // Si no, elegir automáticamente la mejor masculina
-  return _getBestMaleVoice(voices);
+  return _getBestVoice(voices);
 }
 
 let _speakDebounce = null;
@@ -343,10 +322,10 @@ function speakWithSystem(text, onEnd) {
   _speakDebounce = setTimeout(() => {
     if (window.speechSynthesis.speaking || window.speechSynthesis.pending)
       window.speechSynthesis.cancel();
-    const utt   = new SpeechSynthesisUtterance(text);
-    utt.lang    = 'es-MX';
-    utt.rate    = 0.95;
-    utt.pitch   = 0.88;
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.lang  = 'es-MX';
+    utt.rate  = 0.92;
+    utt.pitch = 0.9;
     const voice = _getActiveSystemVoice();
     if (voice) utt.voice = voice;
     utt.onstart = () => _setSpeakingUI(true);
@@ -364,79 +343,95 @@ function _setSpeakingUI(active) {
   if (lbl)  lbl.textContent = active ? '🔊 Hablando...' : '🔊 Listo';
 }
 
-// Poblar selector con voces del sistema, pre-seleccionando la mejor masculina
 function _populateSystemPicker(voices) {
   const select = document.getElementById('voicePicker');
   if (!select) return;
-
   const esVoices = voices.filter(v => v.lang.startsWith('es'));
-  if (!esVoices.length) return;
+  // Incluir también Siri aunque su lang no empiece con 'es' (en Safari puede ser 'es-419' u otro)
+  const siriVoices = voices.filter(v => v.name.toLowerCase().includes('siri') && !esVoices.includes(v));
+  const allVoices = [...esVoices, ...siriVoices];
+  if (!allVoices.length) return;
 
-  // Ordenar: masculinas primero, luego por idioma (es-MX > es-AR > es-ES)
-  const sorted = [...esVoices].sort((a, b) => _scoreVoice(b) - _scoreVoice(a));
+  const sorted = [...allVoices].sort((a, b) => _scoreVoice(b) - _scoreVoice(a));
 
   select.style.display = 'block';
   select.innerHTML = sorted.map(v => {
-    const n     = v.name.toLowerCase();
-    const isMale = MALE_VOICE_PRIORITY.some(m => n.includes(m));
+    const n      = v.name.toLowerCase();
     const isSiri = n.includes('siri');
+    const isMale = MALE_VOICE_NAMES.some(m => n.includes(m));
     const prefix = isSiri ? '⭐' : isMale ? '♂' : '♀';
-    return `<option value="${v.name}">${prefix} ${v.name} (${v.lang})</option>`;
+    const label  = isSiri ? `${prefix} ${v.name} — 🎯 RECOMENDADA` : `${prefix} ${v.name} (${v.lang})`;
+    return `<option value="${v.name}">${label}</option>`;
   }).join('');
 
-  // Preseleccionar automáticamente la mejor voz masculina
-  const best = _getBestMaleVoice(esVoices);
-  if (best) {
+  const best = _getBestVoice(allVoices);
+  if (best && best.name !== state.selectedSystemVoiceName) {
     select.value = best.name;
     state.selectedSystemVoiceName = best.name;
     _setTTSBadge('system', best.name);
   }
 
-  // Cuando el usuario cambia la selección, respetar su elección
   select.onchange = () => {
     state.selectedSystemVoiceName = select.value;
     _setTTSBadge('system', select.value);
-    // Preview inmediato de la voz elegida
-    speakWithSystem('Hola, soy Mauricio.');
+    speakWithSystem('Hola, soy Mauricio. Cuénteme.');
   };
+}
+
+// Re-scan periódico: Safari carga Siri de forma diferida (hasta 3-4s después del DOMContentLoaded)
+// Cuando Siri aparece, actualizamos el selector automáticamente
+function _startVoiceRescan() {
+  let scansLeft = 8; // escanear hasta 8 veces (cada 1.5s = hasta 12s)
+  state.voiceScanInterval = setInterval(() => {
+    if (state.useKokoro) { clearInterval(state.voiceScanInterval); return; }
+    const voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
+    const hasSiri = voices.some(v => v.name.toLowerCase().includes('siri'));
+    if (hasSiri) {
+      clearInterval(state.voiceScanInterval);
+      // Siri encontrada — repoblar selector y seleccionarla
+      _populateSystemPicker(voices);
+      // Si aún no hay elección manual, forzar Siri
+      if (!state.selectedSystemVoiceName || !state.selectedSystemVoiceName.toLowerCase().includes('siri')) {
+        const siriVoice = voices.find(v => v.name.toLowerCase().includes('siri'));
+        if (siriVoice) {
+          state.selectedSystemVoiceName = siriVoice.name;
+          const sel = document.getElementById('voicePicker');
+          if (sel) sel.value = siriVoice.name;
+          _setTTSBadge('system', siriVoice.name);
+        }
+      }
+    }
+    scansLeft--;
+    if (scansLeft <= 0) clearInterval(state.voiceScanInterval);
+  }, 1500);
 }
 
 function _waitForVoicesAndPopulate() {
   if (!window.speechSynthesis) return;
   const voices = window.speechSynthesis.getVoices();
-  if (voices.length > 0) {
-    _populateSystemPicker(voices);
-  } else {
-    // Las voces se cargan de forma async en algunos browsers
-    window.speechSynthesis.onvoiceschanged = () => {
-      if (!state.useKokoro) _populateSystemPicker(window.speechSynthesis.getVoices());
-    };
-  }
+  if (voices.length > 0) _populateSystemPicker(voices);
+  window.speechSynthesis.onvoiceschanged = () => {
+    if (!state.useKokoro) _populateSystemPicker(window.speechSynthesis.getVoices());
+  };
+  // Re-scan diferido para Siri en Safari
+  _startVoiceRescan();
 }
 
 // ─── FUNCIÓN PRINCIPAL DE SÍNTESIS ───────────────────────────────────────────
 function speakText(text, onEnd) {
-  if (state.useKokoro && state.kokoroReady) {
-    speakWithKokoro(text, onEnd);
-  } else {
-    speakWithSystem(text, onEnd);
-  }
+  if (state.useKokoro && state.kokoroReady) speakWithKokoro(text, onEnd);
+  else speakWithSystem(text, onEnd);
 }
 
-// Selector Kokoro
 document.addEventListener('change', (e) => {
   if (e.target.id !== 'voicePicker') return;
-  const val = e.target.value;
-  if (val.startsWith('kokoro_')) {
-    state.selectedKokoroVoice = val.replace('kokoro_', '');
-  }
-  // Las voces sistema las maneja select.onchange directamente
+  // Solo manejar voces Kokoro; las del sistema las maneja select.onchange
+  if (e.target.value.startsWith('kokoro_')) state.selectedKokoroVoice = e.target.value.replace('kokoro_', '');
 });
 
 // ─── RECONOCIMIENTO DE VOZ ────────────────────────────────────────────────────
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
-
 if (SpeechRecognition) {
   recognition = new SpeechRecognition();
   recognition.lang = 'es-UY';
@@ -449,19 +444,10 @@ if (SpeechRecognition) {
     if (el) el.textContent = transcript;
     if (e.results[e.results.length - 1].isFinal) handleVoiceInput(transcript);
   };
-  recognition.onend = () => {
-    state.recognitionActive = false;
-    if (state.isListening) { _cleanupListeningUI(); state.isListening = false; }
-  };
-  recognition.onerror = (e) => {
-    state.recognitionActive = false;
-    state.isListening = false;
-    _cleanupListeningUI();
-    if (e.error !== 'aborted') console.warn('Speech recognition error:', e.error);
-  };
+  recognition.onend = () => { state.recognitionActive = false; if (state.isListening) { _cleanupListeningUI(); state.isListening = false; } };
+  recognition.onerror = (e) => { state.recognitionActive = false; state.isListening = false; _cleanupListeningUI(); };
 }
 
-// ─── UI HELPERS ───────────────────────────────────────────────────────────────
 function _cleanupListeningUI() {
   const btn = document.getElementById('btnVoice');
   const lbl = document.getElementById('voiceLabel');
@@ -478,25 +464,19 @@ function showScreen(id) {
   if (el) el.classList.add('active');
   window.scrollTo(0, 0);
 }
-
 function selectDifficulty(btn) {
   document.querySelectorAll('.diff-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   state.difficulty = btn.dataset.difficulty;
 }
-
 function startTraining() {
   state.sessionCount++;
   updateSessionCounter();
-  if (state.sessionCount >= 3 && !state.unlockedDifficult) {
-    state.unlockedDifficult = true;
-    unlockDifficultMode();
-  }
+  if (state.sessionCount >= 3 && !state.unlockedDifficult) { state.unlockedDifficult = true; unlockDifficultMode(); }
   resetState();
   showScreen('screenTraining');
   loadPhase('name');
 }
-
 function unlockDifficultMode() {
   const grid = document.querySelector('.difficulty-grid');
   if (!grid || document.querySelector('[data-difficulty="dificil"]')) return;
@@ -507,22 +487,19 @@ function unlockDifficultMode() {
   btn.innerHTML = `<span class="diff-emoji">😤</span><span class="diff-name">Difícil</span><span class="diff-desc">Desbloqueado · 3 sesiones</span>`;
   grid.appendChild(btn);
 }
-
 function updateSessionCounter() {
   const el = document.getElementById('sessionCounter');
   if (el) el.textContent = 'Sesión #' + state.sessionCount + ' del día';
 }
-
 function resetState() {
   stopListening();
-  if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending))
-    window.speechSynthesis.cancel();
+  if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) window.speechSynthesis.cancel();
   state.currentPhase = 'name';
-  state.phaseIndex   = 0;
-  state.scores   = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
+  state.phaseIndex = 0;
+  state.scores = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
   state.attempts = { name: 0, same: 0, frame: 0, aim: 0, game: 0 };
   state.totalScore = 0;
-  state.streak     = 0;
+  state.streak = 0;
   state.sessionLog = [];
   updateScoreBadge();
   phases.forEach(p => {
@@ -540,37 +517,30 @@ function resetState() {
 // ─── FASES ────────────────────────────────────────────────────────────────────
 function loadPhase(phase) {
   state.currentPhase = phase;
-  const data        = arbol[phase];
+  const data = arbol[phase];
   const personality = personalities[state.difficulty] || personalities['curioso'];
-
   const badge = document.getElementById('currentPhaseBadge');
   if (badge) badge.textContent = phase.toUpperCase();
-
   phases.forEach(p => {
     const el = document.getElementById('phase' + p.toUpperCase());
     if (el) { el.classList.remove('active'); if (p === phase) el.classList.add('active'); }
   });
-
   const mauricioMsg = personality.responseStyle(data.mauricio);
   const mtEl = document.getElementById('mauricioText');
   if (mtEl) mtEl.textContent = mauricioMsg.text;
-
   const fb = document.getElementById('feedbackArea');
   if (fb) fb.style.display = 'none';
   const tip = document.getElementById('contextTip');
   if (tip) tip.style.display = 'flex';
   const tipText = document.getElementById('contextTipText');
   if (tipText) tipText.textContent = data.hint;
-
   speakText(mauricioMsg.text);
-
   const opts = [...data.options].sort(() => Math.random() - 0.5);
   state.currentOptions = opts;
   renderOptions(opts);
 }
-
 function renderOptions(opts) {
-  const grid   = document.getElementById('optionsGrid');
+  const grid = document.getElementById('optionsGrid');
   const labels = ['A', 'B', 'C'];
   if (!grid) return;
   grid.innerHTML = opts.map((opt, i) => `
@@ -580,70 +550,43 @@ function renderOptions(opts) {
     </button>
   `).join('');
 }
-
-function selectOption(index) {
-  const opt = state.currentOptions[index];
-  state.attempts[state.currentPhase]++;
-  processChoice(opt);
-}
-
+function selectOption(index) { state.attempts[state.currentPhase]++; processChoice(state.currentOptions[index]); }
 function processChoice(opt) {
   document.querySelectorAll('.option-btn').forEach(b => b.disabled = true);
-
   const isCorrect = opt.quality === 'perfect';
   const isOk      = opt.quality === 'ok';
   const points    = isCorrect ? 3 : isOk ? 1 : 0;
-
   state.scores[state.currentPhase] += points;
   state.totalScore += points;
-  if (isCorrect) { state.streak++; state.bestStreak = Math.max(state.streak, state.bestStreak); }
-  else state.streak = 0;
-
+  if (isCorrect) { state.streak++; state.bestStreak = Math.max(state.streak, state.bestStreak); } else state.streak = 0;
   state.phaseHistory[state.currentPhase].push(opt.quality);
   state.sessionLog.push({ phase: state.currentPhase, quality: opt.quality });
-
   updateScoreBadge();
   const sS = document.getElementById('sidebarScore');
   const sT = document.getElementById('sidebarStreak');
   if (sS) sS.textContent = state.totalScore;
   if (sT) sT.textContent = '🔥 ' + state.streak;
-
   const fb  = document.getElementById('feedbackArea');
   const fbc = document.getElementById('feedbackContent');
   if (fb && fbc) {
     fb.style.display = 'block';
-    fbc.className    = 'feedback-content ' + (isCorrect ? 'success' : isOk ? 'warning' : 'error');
-    fbc.innerHTML    = `<strong>${opt.feedback}</strong><div class="feedback-quote">${opt.quote}</div>`;
+    fbc.className = 'feedback-content ' + (isCorrect ? 'success' : isOk ? 'warning' : 'error');
+    fbc.innerHTML = `<strong>${opt.feedback}</strong><div class="feedback-quote">${opt.quote}</div>`;
   }
-
-  if (opt.nextMauricio) {
-    setTimeout(() => {
-      const el = document.getElementById('mauricioText');
-      if (el) el.textContent = opt.nextMauricio;
-      speakText(opt.nextMauricio);
-    }, 1500);
-  }
-
+  if (opt.nextMauricio) setTimeout(() => { const el = document.getElementById('mauricioText'); if (el) el.textContent = opt.nextMauricio; speakText(opt.nextMauricio); }, 1500);
   const phaseEl  = document.getElementById('phase' + state.currentPhase.toUpperCase());
   const statusEl = document.getElementById('status' + state.currentPhase.toUpperCase());
-  if (phaseEl && statusEl) {
-    phaseEl.classList.remove('active');
-    phaseEl.classList.add('done');
-    statusEl.textContent = isCorrect ? '✅' : isOk ? '⚠️' : '❌';
-  }
-
+  if (phaseEl && statusEl) { phaseEl.classList.remove('active'); phaseEl.classList.add('done'); statusEl.textContent = isCorrect ? '✅' : isOk ? '⚠️' : '❌'; }
   setTimeout(() => {
     const nextIndex = phases.indexOf(state.currentPhase) + 1;
-    if (nextIndex < phases.length) loadPhase(phases[nextIndex]);
-    else showResults();
+    if (nextIndex < phases.length) loadPhase(phases[nextIndex]); else showResults();
   }, isCorrect ? 2500 : 3500);
 }
 
-// ─── VOZ (RECONOCIMIENTO) ─────────────────────────────────────────────────────
+// ─── VOZ ─────────────────────────────────────────────────────────────────────────
 function toggleVoice() { state.isListening ? stopListening() : startListening(); }
-
 function startListening() {
-  if (!recognition) { alert('Tu navegador no soporta reconocimiento de voz. Usá Chrome.'); return; }
+  if (!recognition) { alert('Usá Safari en macOS para voz.'); return; }
   if (state.recognitionActive) return;
   state.isListening = true;
   const btn = document.getElementById('btnVoice');
@@ -654,19 +597,14 @@ function startListening() {
   if (lbl) lbl.textContent = 'Escuchando...';
   if (vt)  vt.style.display = 'flex';
   if (tt)  tt.textContent   = 'Esperando...';
-  try { recognition.start(); } catch (e) {
-    state.isListening = false;
-    _cleanupListeningUI();
-  }
+  try { recognition.start(); } catch (e) { state.isListening = false; _cleanupListeningUI(); }
 }
-
 function stopListening() {
   if (!state.isListening) return;
   state.isListening = false;
   _cleanupListeningUI();
   if (state.recognitionActive) { try { recognition.stop(); } catch (e) {} }
 }
-
 function handleVoiceInput(transcript) {
   stopListening();
   const t = transcript.toLowerCase();
@@ -679,83 +617,54 @@ function handleVoiceInput(transcript) {
     if (score > bestScore) { bestScore = score; bestMatch = i; }
   });
   if (bestScore > 0.12 && bestMatch !== null) selectOption(bestMatch);
-  else {
-    const rl = document.getElementById('responseLabel');
-    if (rl) rl.textContent = '"' + transcript.substring(0, 60) + '..." — Elegí la opción más cercana:';
-  }
+  else { const rl = document.getElementById('responseLabel'); if (rl) rl.textContent = '"' + transcript.substring(0, 60) + '..." — Elegí la opción más cercana:'; }
 }
-
 function toggleVoiceChat() {
   state.isVoiceChatMode = !state.isVoiceChatMode;
   const btn = document.getElementById('btnVoiceChat');
   const lbl = document.getElementById('voiceChatLabel');
-  if (state.isVoiceChatMode) {
-    if (btn) btn.classList.add('active');
-    if (lbl) lbl.textContent = '🎤 Modo voz activo — hablá libremente';
-    startListening();
-  } else {
-    if (btn) btn.classList.remove('active');
-    if (lbl) lbl.textContent = 'Modo voz libre';
-    stopListening();
-  }
+  if (state.isVoiceChatMode) { if (btn) btn.classList.add('active'); if (lbl) lbl.textContent = '🎤 Modo voz activo'; startListening(); }
+  else { if (btn) btn.classList.remove('active'); if (lbl) lbl.textContent = 'Modo voz libre'; stopListening(); }
 }
+function repeatMauricio() { const el = document.getElementById('mauricioText'); if (el) speakText(el.textContent); }
 
-function repeatMauricio() {
-  const el = document.getElementById('mauricioText');
-  if (el) speakText(el.textContent);
-}
-
-// ─── PROGRESO Y RESULTADOS ────────────────────────────────────────────────────
+// ─── RESULTADOS ───────────────────────────────────────────────────────────────────
 function calcPhaseAvg(phase) {
   const hist = state.phaseHistory[phase];
   if (!hist.length) return null;
   const sum = hist.reduce((a, q) => a + (q === 'perfect' ? 3 : q === 'ok' ? 1 : 0), 0);
   return Math.round((sum / (hist.length * 3)) * 100);
 }
-
 function showResults() {
   showScreen('screenResults');
-  const total    = state.totalScore;
+  const total = state.totalScore;
   const maxScore = phases.length * 3;
-  const pct      = Math.round((total / maxScore) * 100);
+  const pct = Math.round((total / maxScore) * 100);
   let icon = '🏆', title = '¡Pitch dominado!', subtitle = 'Estás listo para el lunes.';
-  if (pct < 40)      { icon = '😅'; title = 'Hay que practicar más';  subtitle = 'Repetí antes del lunes.'; }
-  else if (pct < 70) { icon = '💪'; title = '¡Buen progreso!';        subtitle = 'Enfocate en las fases débiles.'; }
-  const rIcon  = document.getElementById('resultsIcon');
-  const rTitle = document.getElementById('resultsTitle');
-  const rSub   = document.getElementById('resultsSubtitle');
-  if (rIcon)  rIcon.textContent  = icon;
-  if (rTitle) rTitle.textContent = title;
-  if (rSub)   rSub.textContent   = subtitle;
+  if (pct < 40) { icon = '😅'; title = 'Hay que practicar más'; subtitle = 'Repetí antes del lunes.'; }
+  else if (pct < 70) { icon = '💪'; title = '¡Buen progreso!'; subtitle = 'Enfocate en las fases débiles.'; }
+  const rIcon = document.getElementById('resultsIcon'); if (rIcon) rIcon.textContent = icon;
+  const rTitle = document.getElementById('resultsTitle'); if (rTitle) rTitle.textContent = title;
+  const rSub = document.getElementById('resultsSubtitle'); if (rSub) rSub.textContent = subtitle;
   updateScoreBadge();
   const grid = document.getElementById('resultsGrid');
-  if (grid) {
-    grid.innerHTML = phases.map(p => {
-      const s   = state.scores[p];
-      const avg = calcPhaseAvg(p);
-      const cls = s >= 3 ? 'good' : s >= 1 ? 'ok' : 'bad';
-      const lbl = s >= 3 ? 'Perfecto' : s >= 1 ? 'Mejorable' : 'Repasar';
-      const trendHtml = avg !== null ? `<div class="result-trend">${avg}% histórico (${state.phaseHistory[p].length} ses.)</div>` : '';
-      return `<div class="result-card"><div class="result-phase">${p.toUpperCase()}</div><div class="result-score ${cls}">${s >= 3 ? '✅' : s >= 1 ? '⚠️' : '❌'}</div><div class="result-label">${lbl}</div>${trendHtml}</div>`;
-    }).join('');
-  }
+  if (grid) grid.innerHTML = phases.map(p => {
+    const s = state.scores[p]; const avg = calcPhaseAvg(p);
+    const cls = s >= 3 ? 'good' : s >= 1 ? 'ok' : 'bad';
+    const lbl = s >= 3 ? 'Perfecto' : s >= 1 ? 'Mejorable' : 'Repasar';
+    const trend = avg !== null ? `<div class="result-trend">${avg}% histórico</div>` : '';
+    return `<div class="result-card"><div class="result-phase">${p.toUpperCase()}</div><div class="result-score ${cls}">${s >= 3 ? '✅' : s >= 1 ? '⚠️' : '❌'}</div><div class="result-label">${lbl}</div>${trend}</div>`;
+  }).join('');
   const weak = phases.filter(p => state.scores[p] < 3).map(p => p.toUpperCase());
   const rSum = document.getElementById('resultsSummary');
-  if (rSum) rSum.innerHTML = `
-    <strong>Sesión #${state.sessionCount} · Puntaje: ${total}/${maxScore} (${pct}%)</strong><br>
-    Mejor racha hoy: 🔥 ${state.bestStreak} decisiones correctas<br>
-    ${weak.length ? '<br>⚠️ Fases a repasar: <strong>' + weak.join(', ') + '</strong>' : '✅ Todas las fases dominadas'}
-    ${state.sessionCount >= 3 ? '<br>🔓 Modo <strong>Difícil</strong> desbloqueado.' : ''}
-  `;
+  if (rSum) rSum.innerHTML = `<strong>Sesión #${state.sessionCount} · ${total}/${maxScore} (${pct}%)</strong><br>Mejor racha: 🔥 ${state.bestStreak}<br>${weak.length ? '⚠️ Repasar: <strong>' + weak.join(', ') + '</strong>' : '✅ Todo dominado'}`;
   let rec = '💡 ';
-  if (pct >= 80)      rec += 'Estás listo. Mauricio te va a escuchar. Confiá en tu NAME y tu FRAME.';
-  else if (pct >= 50) rec += 'Repetí especialmente ' + (weak[0] || 'FRAME') + '. Es tu fase más débil.';
-  else                rec += 'Practicá 3 sesiones más. Enfocate en el SAME — donde más se gana o pierde.';
-  const rRec = document.getElementById('resultsRecommendation');
-  if (rRec) rRec.textContent = rec;
+  if (pct >= 80) rec += 'Estás listo. Confiá en tu NAME y tu FRAME.';
+  else if (pct >= 50) rec += 'Repetí ' + (weak[0] || 'FRAME') + '. Es tu fase más débil.';
+  else rec += 'Practicá 3 sesiones más. SAME es donde más se gana.';
+  const rRec = document.getElementById('resultsRecommendation'); if (rRec) rRec.textContent = rec;
   buildCheatsheet();
 }
-
 function restartSameConfig() { startTraining(); }
 
 // ─── CHEATSHEET ───────────────────────────────────────────────────────────────
@@ -766,7 +675,6 @@ const cheatsheetData = [
   { phase: 'AIM',   text: 'En el primer mes: las consultas repetitivas de WhatsApp se responden solas. Tenés un tablero con tus números clave. Y recibís alertas cuando algo importante se desvía. No tenés que estar en todo.' },
   { phase: 'GAME',  text: 'Mi juego es que cualquier PyME de Canelones tome decisiones con la misma claridad que una gran cadena. Imperio ya es el referente en precio y cercanía. Yo quiero que sea también el primer supermercado verdaderamente inteligente de la zona. Nivel Tienda Inglesa, costo de PyME.' }
 ];
-
 function buildCheatsheet() {
   const el  = document.getElementById('cheatsheet');
   const fcC = document.getElementById('fcContent');
@@ -774,21 +682,13 @@ function buildCheatsheet() {
   if (el)  el.innerHTML  = html;
   if (fcC) fcC.innerHTML = cheatsheetData.map(d => `<div class="fc-phase">${d.phase}</div><div class="fc-text">${d.text}</div>`).join('');
 }
-
-function toggleCheatsheet() {
-  const el = document.getElementById('cheatsheet');
-  if (!el) return;
-  el.style.display = el.style.display === 'none' ? 'block' : 'none';
-}
-
+function toggleCheatsheet() { const el = document.getElementById('cheatsheet'); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
 function toggleFloatingCheatsheet() {
   const el = document.getElementById('floatingCheatsheet');
   if (!el) return;
   el.style.display = el.style.display === 'none' ? 'block' : 'none';
   if (el.style.display === 'block') buildCheatsheet();
 }
-
-// ─── EXPORTAR GUION ───────────────────────────────────────────────────────────
 function exportGuion() {
   const lines = [
     '=== GUION BlueIA — VISITA A MAURICIO · Imperio del Este, Salinas ===', '',
@@ -807,25 +707,17 @@ function exportGuion() {
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-function updateScoreBadge() {
-  const el = document.getElementById('scoreBadge');
-  if (el) el.textContent = 'Score: ' + state.totalScore;
-}
+function updateScoreBadge() { const el = document.getElementById('scoreBadge'); if (el) el.textContent = 'Score: ' + state.totalScore; }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 (function init() {
-  const html   = document.documentElement;
+  const html = document.documentElement;
   const toggle = document.getElementById('themeToggle');
-  let theme    = html.getAttribute('data-theme') || 'dark';
+  let theme = html.getAttribute('data-theme') || 'dark';
   html.setAttribute('data-theme', theme);
-  if (toggle) toggle.addEventListener('click', () => {
-    theme = theme === 'dark' ? 'light' : 'dark';
-    html.setAttribute('data-theme', theme);
-  });
+  if (toggle) toggle.addEventListener('click', () => { theme = theme === 'dark' ? 'light' : 'dark'; html.setAttribute('data-theme', theme); });
   buildCheatsheet();
   updateSessionCounter();
-  // Kokoro carga en background; mientras tanto, ya tenemos voces del sistema listas
-  _waitForVoicesAndPopulate();
-  initKokoro();
+  _waitForVoicesAndPopulate(); // inicia re-scan periódico para Siri
+  initKokoro();                // intenta Kokoro en background
 })();
